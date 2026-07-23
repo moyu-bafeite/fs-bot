@@ -15,7 +15,7 @@ def main() -> None:
     parser.add_argument(
         "type",
         nargs="?",
-        choices=["scrape", "download", "sync-stocks"],
+        choices=["scrape", "download", "sync-stocks", "cleanup"],
         help="任务类型",
     )
     parser.add_argument("-h", "--help", action="store_true")
@@ -60,6 +60,17 @@ def main() -> None:
 
         count = sync()
         print(f"完成，共写入 {count} 条股票记录")
+
+    elif args.type == "cleanup":
+        from app.cleanup_filings import build_arg_parser, cleanup
+
+        sub = build_arg_parser()
+        if args.help:
+            sub.print_help()
+            return
+        opts = sub.parse_args(remaining)
+        count = cleanup(opts.stock_code)
+        print(f"完成，共删除 {count} 条噪声记录")
 
 
 if __name__ == "__main__":

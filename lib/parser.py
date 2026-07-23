@@ -23,9 +23,13 @@ def normalize_ticker(ticker: str) -> str:
     return code.zfill(5)
 
 
-def classify_filing(title: str) -> str | None:
+def classify_filing(
+    title: str, exclude_pattern: re.Pattern[str] | None = None
+) -> str | None:
     """判断文件类型，返回 'annual' / 'interim' / None。"""
     if _SUMMARY_PATTERN.search(title):
+        return None
+    if exclude_pattern and exclude_pattern.search(title):
         return None
     if _ANNUAL_PATTERNS.search(title):
         return "annual"
@@ -51,11 +55,22 @@ def extract_report_year(title: str, date_str: str) -> int | None:
     return None
 
 
-def filter_annual_and_interim(records: list[dict]) -> list[dict]:
+def build_exclude_pattern(keywords: list[str]) -> re.Pattern[str] | None:
+    """将关键词列表编译为排除正则，空列表返回 None。"""
+    if not keywords:
+        return None
+    escaped = [re.escape(kw) for kw in keywords]
+    return re.compile("|".join(escaped), re.IGNORECASE)
+
+
+def filter_annual_and_interim(
+    records: list[dict],
+    exclude_pattern: re.Pattern[str] | None = None,
+) -> list[dict]:
     """从 HKEX 文件列表中筛选年报和中报，返回结构化记录。"""
     results: list[dict] = []
     for rec in records:
-        filing_type = classify_filing(rec["title"])
+        filing_type = classify_filing(rec["title"], exclude_pattern)
         if filing_type is None:
             continue
         report_year = extract_report_year(rec["title"], rec.get("date_time", ""))

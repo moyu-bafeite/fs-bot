@@ -14,6 +14,7 @@ _client = create_client(_url, _key, ClientOptions(schema="meta_data"))
 FILINGS_TABLE = "filings"
 STOCKS_TABLE = "sehk_active_stocks"
 LOG_TABLE = "filing_logs"
+EXCLUDE_KEYWORDS_TABLE = "filing_excluded_keywords"
 
 
 def _table(name: str):
@@ -87,3 +88,43 @@ def get_stock_id_map_from_db() -> dict[str, int]:
     """从 DB 读取 stock_code → hkex_id 映射。"""
     resp = _table(STOCKS_TABLE).select("stock_code, hkex_id").execute()
     return {row["stock_code"]: row["hkex_id"] for row in resp.data}
+
+
+def get_excluded_keywords() -> list[str]:
+    """获取已启用的排除关键词列表。"""
+    resp = (
+        _table(EXCLUDE_KEYWORDS_TABLE).select("keyword").eq("enabled", True).execute()
+    )
+    return [row["keyword"] for row in resp.data]
+
+
+def get_filings_by_keywords(keywords: list[str]) -> list[dict[str, Any]]:
+    """查询标题匹配排除关键词的 filings 记录。"""
+    if not keywords:
+        return []
+    all_records: list[dict[str, Any]] = []
+    for kw in keywords:
+        resp = (
+            _table(FILINGS_TABLE)
+            .select(
+                "id, news_id, stock_code, title, filing_type, report_year, filing_date, file_url"
+            )
+            .ilike("title", f"%{kw}%")
+            .execute()
+        )
+        all_records.extend(resp.data)
+    seen: set[int] = set()
+    unique: list[dict[str, Any]] = []
+    for rec in all_records:
+        if rec["id"] not in seen:
+            seen.add(rec["id"])
+            unique.append(rec)
+    return unique
+
+
+def delete_filings_by_ids(ids: list[int]) -> int:
+    """按 ID 列表删除 filings 记录，返回删除数量。"""
+    if not ids:
+        return 0
+    resp = _table(FILINGS_TABLE).delete().in_("id", ids).execute()
+    return len(resp.data)
