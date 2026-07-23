@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+requirements.txt
 
 # Virtual environments
 .venv
@@ -20,3 +21,4 @@ wheels/
 .mimocode/package.json
 .mimocode/package-lock.json
 .mimocode/.gitignore
+.vercel
