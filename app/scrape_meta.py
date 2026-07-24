@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from lib.db import get_excluded_keywords, log_error, upsert_filings
+from lib.db import (
+    get_excluded_keywords,
+    get_latest_filing_date,
+    log_error,
+    upsert_filings,
+)
 from lib.hkex import fetch_filings
 from lib.parser import (
     build_exclude_pattern,
@@ -14,7 +19,6 @@ from lib.parser import (
     normalize_ticker,
 )
 
-DEFAULT_DAYS = 30
 START_YEAR = 2010
 
 
@@ -26,14 +30,9 @@ def scrape(
 ) -> int:
     """爬取元数据并写入 DB，返回写入记录数。"""
     now = datetime.now()
-    if full:
-        date_from = datetime(START_YEAR, 1, 1)
+    user_specified_from = date_from is not None
+    if date_to is None:
         date_to = now
-    else:
-        if date_from is None:
-            date_from = now - timedelta(days=DEFAULT_DAYS)
-        if date_to is None:
-            date_to = now
 
     exclude_keywords = get_excluded_keywords()
     exclude_pattern = build_exclude_pattern(exclude_keywords)
@@ -43,8 +42,27 @@ def scrape(
     total = 0
     for ticker in tickers:
         code = normalize_ticker(ticker)
+
+        # 确定查询起始日期
+        if full:
+            effective_from = datetime(START_YEAR, 1, 1)
+        elif user_specified_from:
+            effective_from = date_from
+        else:
+            latest = get_latest_filing_date(code)
+            if latest:
+                # 从最新记录的当月 1 日开始
+                ld = datetime.strptime(latest, "%Y-%m-%d")
+                effective_from = datetime(ld.year, ld.month, 1)
+                print(
+                    f"[{code}] 增量模式：从 {effective_from.strftime('%Y-%m-%d')} 开始"
+                )
+            else:
+                effective_from = datetime(START_YEAR, 1, 1)
+                print(f"[{code}] 全量模式：无历史记录")
+
         try:
-            raw = fetch_filings(code, date_from, date_to)
+            raw = fetch_filings(code, effective_from, date_to)
             filings = filter_annual_and_interim(raw, exclude_pattern)
             if filings:
                 upsert_filings(filings)
@@ -57,7 +75,7 @@ def scrape(
                 stock_code=code,
                 details={
                     "ticker": ticker,
-                    "date_from": date_from.isoformat(),
+                    "date_from": effective_from.isoformat(),
                     "date_to": date_to.isoformat(),
                 },
             )

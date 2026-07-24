@@ -103,6 +103,21 @@ def get_stock_id_map_from_db() -> dict[str, int]:
     return {row["stock_code"]: row["hkex_id"] for row in all_rows}
 
 
+def get_latest_filing_date(stock_code: str) -> str | None:
+    """获取指定股票最新的 filing_date，返回 YYYY-MM-DD 字符串或 None。"""
+    resp = (
+        _table(FILINGS_TABLE)
+        .select("filing_date")
+        .eq("stock_code", stock_code)
+        .order("filing_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if resp.data:
+        return resp.data[0]["filing_date"]
+    return None
+
+
 def get_excluded_keywords() -> list[str]:
     """获取已启用的排除关键词列表。"""
     resp = (
