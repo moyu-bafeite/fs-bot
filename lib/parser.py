@@ -67,11 +67,15 @@ def filter_annual_and_interim(
     records: list[dict],
     exclude_pattern: re.Pattern[str] | None = None,
 ) -> list[dict]:
-    """从 HKEX 文件列表中筛选年报和中报，返回结构化记录。"""
+    """从 HKEX 定期报告列表中过滤并返回结构化记录。
+
+    API 已用 category=2 过滤，filing_type 由 _parse_record 确定。
+    此函数仅做排除关键词过滤和 report_year 提取。
+    """
     results: list[dict] = []
     for rec in records:
-        filing_type = classify_filing(rec["title"], exclude_pattern)
-        if filing_type is None:
+        # 排除关键词过滤
+        if exclude_pattern and exclude_pattern.search(rec["title"]):
             continue
         report_year = extract_report_year(rec["title"], rec.get("date_time", ""))
         results.append(
@@ -80,7 +84,7 @@ def filter_annual_and_interim(
                 "stock_code": rec["stock_code"],
                 "stock_name": rec["stock_name"],
                 "title": rec["title"],
-                "filing_type": filing_type,
+                "filing_type": rec.get("filing_type", "annual"),
                 "report_year": report_year,
                 "filing_date": _parse_date(rec.get("date_time", "")),
                 "file_url": rec["file_url"],

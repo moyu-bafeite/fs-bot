@@ -58,7 +58,11 @@ def _fetch_chunk(
     date_from: datetime,
     date_to: datetime,
 ) -> list[dict]:
-    """获取单个月份分块的指定股票文件记录。"""
+    """获取单个月份分块的指定股票定期报告。
+
+    t1code=40000: Financial Statements/ESG Information
+    t2code=-2: 全部子类（年报+中报+季报+ESG）
+    """
     from_str = date_from.strftime("%Y%m%d")
     to_str = date_to.strftime("%Y%m%d")
 
@@ -73,7 +77,7 @@ def _fetch_chunk(
             "sortDir": "0",
             "sortByRecordDate": "on",
             "searchType": "0",
-            "t1code": "-2",
+            "t1code": "40000",
             "t2Gcode": "-2",
             "t2code": "-2",
             "documentType": "-1",
@@ -125,7 +129,7 @@ def _fetch_chunk(
                 "toDate": to_str,
                 "title": "",
                 "searchType": "0",
-                "t1code": "-2",
+                "t1code": "40000",
                 "t2Gcode": "-2",
                 "t2code": "-2",
                 "rowRange": str(row_range),
@@ -177,16 +181,32 @@ def _parse_record(record: dict) -> dict:
     title = record.get("TITLE", "")
     title = title.replace("&#x3b;", ";").replace("&amp;", "&")
 
+    # 从 LONG_TEXT 或标题判断 filing_type
+    long_text = record.get("LONG_TEXT", "")
+    filing_type = _detect_filing_type(title, long_text)
+
     return {
         "news_id": record.get("NEWS_ID", ""),
         "stock_code": raw_code,
         "stock_name": _squash_ws(raw_name),
         "title": _squash_ws(title),
+        "filing_type": filing_type,
         "file_type": record.get("FILE_TYPE", ""),
         "file_url": file_link,
         "file_size": record.get("FILE_INFO", ""),
         "date_time": date_part,
     }
+
+
+def _detect_filing_type(title: str, long_text: str) -> str:
+    """从标题或分类文本判断是年报还是中报。"""
+    combined = f"{title} {long_text}".lower()
+    if "interim" in combined or "half-year" in combined or "half year" in combined:
+        return "interim"
+    if "annual" in combined:
+        return "annual"
+    # 默认按标题中的年份和月份推断
+    return "annual"
 
 
 def _squash_ws(text: str) -> str:
