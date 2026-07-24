@@ -27,16 +27,7 @@ _API_CHUNK_SIZE = 5000
 
 
 def get_stock_id_map() -> dict[str, int]:
-    """获取股票代码到内部 ID 的映射表。优先从 DB 读取，回退到 HTTP。"""
-    from lib.db import get_stock_id_map_from_db
-
-    try:
-        db_map = get_stock_id_map_from_db()
-        if db_map:
-            return db_map
-    except Exception:
-        pass
-
+    """获取股票代码到内部 ID 的映射表。始终从 HKEX API 获取最新数据。"""
     resp = httpx.get(HKEX_STOCK_LIST_URL, timeout=30)
     resp.raise_for_status()
     stocks = resp.json()

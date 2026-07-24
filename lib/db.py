@@ -85,9 +85,22 @@ def upsert_stocks(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def get_stock_id_map_from_db() -> dict[str, int]:
-    """从 DB 读取 stock_code → hkex_id 映射。"""
-    resp = _table(STOCKS_TABLE).select("stock_code, hkex_id").execute()
-    return {row["stock_code"]: row["hkex_id"] for row in resp.data}
+    """从 DB 读取 stock_code → hkex_id 映射（分页查询全量数据）。"""
+    all_rows: list[dict[str, Any]] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _table(STOCKS_TABLE)
+            .select("stock_code, hkex_id")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        all_rows.extend(resp.data)
+        if len(resp.data) < page_size:
+            break
+        offset += page_size
+    return {row["stock_code"]: row["hkex_id"] for row in all_rows}
 
 
 def get_excluded_keywords() -> list[str]:
