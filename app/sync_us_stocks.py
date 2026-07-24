@@ -8,6 +8,7 @@ import time
 
 from futu import RET_OK, Market, OpenQuoteContext, SecurityType
 from rich.console import Console
+from rich.progress import track
 from rich.table import Table
 
 from lib.db import (
@@ -128,20 +129,29 @@ def sync(full: bool = False) -> int:
 
         # 6. 逐个调用 get_company_profile
         updated = 0
-        for i, ticker in enumerate(tickers_for_profile, 1):
-            sector, fiscal_month, fiscal_day = _fetch_company_profile(quote_ctx, ticker)
-            update_us_stock_profile(ticker, sector, fiscal_month, fiscal_day)
-            updated += 1
-            if i % 100 == 0:
-                console.print(f"  进度: {i}/{len(tickers_for_profile)}")
+        failed: list[str] = []
+        for ticker in track(tickers_for_profile, description="获取公司概况..."):
+            try:
+                sector, fiscal_month, fiscal_day = _fetch_company_profile(
+                    quote_ctx, ticker
+                )
+                update_us_stock_profile(ticker, sector, fiscal_month, fiscal_day)
+                updated += 1
+            except Exception as e:  # noqa: BLE001
+                failed.append(f"{ticker} ({e})")
             # rate limit: 30次/30秒
             time.sleep(1.1)
 
-    _print_summary(all_records, len(new_tickers), updated)
+    _print_summary(all_records, len(new_tickers), updated, failed)
     return len(all_records)
 
 
-def _print_summary(records: list[dict], new_count: int, profile_updated: int) -> None:
+def _print_summary(
+    records: list[dict],
+    new_count: int,
+    profile_updated: int,
+    failed: list[str],
+) -> None:
     """打印同步结果摘要。"""
     table = Table(title="美股同步结果")
     table.add_column("指标", style="cyan")
@@ -149,4 +159,13 @@ def _print_summary(records: list[dict], new_count: int, profile_updated: int) ->
     table.add_row("未退市正股总数", str(len(records)))
     table.add_row("新增写入", str(new_count))
     table.add_row("公司概况更新", str(profile_updated))
+    table.add_row("失败", str(len(failed)), style="red" if failed else "green")
     console.print(table)
+
+    if failed:
+        fail_table = Table(title="失败列表")
+        fail_table.add_column("序号", style="dim", justify="right")
+        fail_table.add_column("Ticker / 错误", style="red")
+        for i, item in enumerate(failed, 1):
+            fail_table.add_row(str(i), item)
+        console.print(fail_table)
