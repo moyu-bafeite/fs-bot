@@ -16,7 +16,7 @@ def main() -> None:
     parser.add_argument(
         "type",
         nargs="?",
-        choices=["sync-hk-stocks", "sync-us-stocks"],
+        choices=["sync-hk-stocks", "sync-us-stocks", "sync-us-fs"],
         help="任务类型",
     )
     parser.add_argument("-h", "--help", action="store_true")
@@ -46,6 +46,21 @@ def main() -> None:
         opts = sub.parse_args(remaining)
         count = sync(opts.full)
         print(f"完成，共写入 {count} 条美股记录")
+
+    elif args.type == "sync-us-fs":
+        import sys
+
+        from app.sync_us_stocks_fs import main as fs_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["sync-us-fs", "--help"]
+            else:
+                sys.argv = ["sync-us-fs"] + remaining
+            fs_main()
+        finally:
+            sys.argv = old_argv
 
 
 if __name__ == "__main__":
