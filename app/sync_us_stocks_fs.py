@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime
 
 import futu as ft
@@ -63,6 +66,22 @@ MAX_FP_ORDER = {
 FTYPES_MUL_QUARTERLY = [11]
 
 
+@dataclass
+class StockResult:
+    ticker: str
+    currency: str = ""
+    row_count: int = 0
+    min_fy: int = 0
+    max_fy: int = 0
+    max_fp: str = "ANNUAL"
+    fd_inserted: int = 0
+    fd_skipped: int = 0
+    fd_error: int = 0
+    meta_result: str = "error"
+    ok: bool = False
+    error_msg: str = ""
+
+
 def get_stock_list(args: argparse.Namespace) -> list[dict]:
     if args.tickers:
         tickers = [t.strip() for t in args.tickers.split(",") if t.strip()]
@@ -83,7 +102,7 @@ def fetch_reports(
     financial_types: list[int],
     statement_filter: set[str] | None,
     interval: float,
-) -> list[tuple[str, dict]] | None:
+) -> list[tuple[str, dict]]:
     tagged: list[tuple[str, dict]] = []
     st_config = [
         (t, k)
@@ -95,19 +114,13 @@ def fetch_reports(
         for fin_type in financial_types:
             next_key = None
             while True:
-                try:
-                    ret, data = ctx.get_financials_statements(
-                        ticker,
-                        statement_type=st_type,
-                        financial_type=fin_type,
-                        num=20,
-                        next_key=next_key,
-                    )
-                except Exception as e:
-                    console.print(
-                        f"  [yellow]Futu API 异常 ({ticker} {st_key} type={fin_type}): {e}[/yellow]"
-                    )
-                    break
+                ret, data = ctx.get_financials_statements(
+                    ticker,
+                    statement_type=st_type,
+                    financial_type=fin_type,
+                    num=50,
+                    next_key=next_key,
+                )
                 if ret != ft.RET_OK:
                     break
                 for report in data.get("report_list", []):
@@ -118,7 +131,7 @@ def fetch_reports(
                 time.sleep(interval)
         time.sleep(interval)
 
-    return tagged if tagged else None
+    return tagged
 
 
 def reports_to_rows(tagged: list[tuple[str, dict]]) -> list[dict]:
@@ -153,67 +166,40 @@ def get_currency(tagged: list[tuple[str, dict]]) -> str:
     return "USD"
 
 
-def run(args: argparse.Namespace) -> None:
-    stocks = get_stock_list(args)
-    total = len(stocks)
-    if args.max_stocks and args.max_stocks > 0:
-        stocks = stocks[: args.max_stocks]
-        total = len(stocks)
+def process_one_stock(
+    ctx: ft.OpenQuoteContext,
+    api_lock: threading.Lock,
+    lock: threading.Lock,
+    idx: int,
+    total: int,
+    quiet: bool,
+    stock: dict,
+    stmt_filter: set[str] | None,
+    interval: float,
+    dry_run: bool,
+) -> StockResult:
+    """处理单只股票的完整流程（在 worker 线程中执行）。"""
+    ticker = stock["ticker"]
+    result = StockResult(ticker=ticker)
 
-    if total == 0:
-        console.print("  无待处理股票")
-        return
-
-    console.print(f"  待处理: {total} 只")
+    if not quiet:
+        with lock:
+            console.print(f"  [{idx:>4d}/{total}] {ticker} - 开始抓取...")
 
     try:
-        ctx = ft.OpenQuoteContext(host="127.0.0.1", port=11111)
-    except Exception as e:
-        console.print(f"  [red]连接 FutuOpenD 失败: {e}[/red]")
-        return
-    console.print("  已连接 FutuOpenD\n")
-
-    stmt_filter = None
-    if args.statements and args.statements != "all":
-        stmt_filter = {s.strip() for s in args.statements.split(",")}
-
-    ok_count = 0
-    fail_count = 0
-    start_time = time.time()
-    stats: dict[str, int] = {
-        "fd_inserted": 0,
-        "fd_skipped": 0,
-        "fd_error": 0,
-        "meta_inserted": 0,
-        "meta_updated": 0,
-        "meta_error": 0,
-    }
-
-    progress_table = Table(
-        show_header=True, header_style="bold cyan", box=None, padding=(0, 1)
-    )
-    progress_table.add_column("#", justify="right", width=5)
-    progress_table.add_column("Ticker", width=12)
-    progress_table.add_column("Currency", width=8)
-    progress_table.add_column("Rows", justify="right", width=6)
-    progress_table.add_column("FY Range", width=11)
-    progress_table.add_column("Max FP", width=8)
-    progress_table.add_column("Status", width=8)
-
-    for i, stock in enumerate(stocks, 1):
-        ticker = stock["ticker"]
-
-        tagged = fetch_reports(
-            ctx, ticker, FTYPES_MUL_QUARTERLY, stmt_filter, args.interval
-        )
+        with api_lock:
+            tagged = fetch_reports(
+                ctx, ticker, FTYPES_MUL_QUARTERLY, stmt_filter, interval
+            )
 
         if not tagged:
-            fail_count += 1
-            if not args.quiet:
-                progress_table.add_row(
-                    str(i), ticker, "-", "-", "-", "-", "[red]无数据[/red]"
+            raise ValueError("无数据")
+
+        if not quiet:
+            with lock:
+                console.print(
+                    f"  [{idx:>4d}/{total}] {ticker} - API 完成, {len(tagged)} 条报告"
                 )
-            continue
 
         rows = reports_to_rows(tagged)
         currency = get_currency(tagged)
@@ -236,9 +222,8 @@ def run(args: argparse.Namespace) -> None:
         for r in rows:
             r["ticker"] = ticker
 
-        row_count = 0
-        if not args.dry_run:
-            row_count = insert_financial_items(rows)
+        if not dry_run:
+            result.row_count = insert_financial_items(rows)
 
             stock_fd: dict[tuple[int, str], dict] = {}
             for st_key, report in tagged:
@@ -249,50 +234,154 @@ def run(args: argparse.Namespace) -> None:
                         stock_fd.setdefault((fid, st_key), {"en": dn})
 
             fd_stats = upsert_field_defs_batch(stock_fd)
-            for k in ("inserted", "skipped", "error"):
-                stats["fd_" + k] = stats.get("fd_" + k, 0) + fd_stats.get(k, 0)
+            result.fd_inserted = fd_stats.get("inserted", 0)
+            result.fd_skipped = fd_stats.get("skipped", 0)
+            result.fd_error = fd_stats.get("error", 0)
 
             if fd_stats.get("skipped", 0) > 0:
                 check_field_def_conflicts(stock_fd)
 
-            result = upsert_us_fs_metadata(ticker, currency, min_fy, max_fy, max_fp)
-            stats["meta_" + result] = stats.get("meta_" + result, 0) + 1
-
-        if row_count > 0 or args.dry_run:
-            ok_count += 1
-            status = "[green]OK[/green]"
-        else:
-            fail_count += 1
-            status = "[red]FAIL[/red]"
-
-        fy_range = f"{min_fy}-{max_fy}"
-        if not args.quiet:
-            progress_table.add_row(
-                str(i), ticker, currency, str(len(rows)), fy_range, max_fp, status
+            result.meta_result = upsert_us_fs_metadata(
+                ticker, currency, min_fy, max_fy, max_fp
             )
+        else:
+            result.row_count = len(rows)
+
+        result.currency = currency
+        result.min_fy = min_fy
+        result.max_fy = max_fy
+        result.max_fp = max_fp
+        result.ok = result.row_count > 0
+
+    except Exception as e:
+        result.error_msg = str(e)
+
+    if not quiet:
+        with lock:
+            if result.ok:
+                fy_range = f"{result.min_fy}-{result.max_fy}"
+                console.print(
+                    f"  [{idx:>4d}/{total}] {ticker} - "
+                    f"{result.currency} {result.row_count}r {fy_range} {result.max_fp} [green]OK[/green]"
+                )
+            else:
+                console.print(
+                    f"  [{idx:>4d}/{total}] {ticker} - [red]FAIL[/red] {result.error_msg[:50]}"
+                )
+
+    return result
+
+
+def run(args: argparse.Namespace) -> None:
+    stocks = get_stock_list(args)
+    total = len(stocks)
+    if args.max_stocks and args.max_stocks > 0:
+        stocks = stocks[: args.max_stocks]
+        total = len(stocks)
+
+    if total == 0:
+        console.print("  无待处理股票")
+        return
+
+    console.print(f"  待处理: {total} 只  并发: {args.workers}")
+
+    try:
+        ctx = ft.OpenQuoteContext(host="127.0.0.1", port=11111)
+    except Exception as e:
+        console.print(f"  [red]连接 FutuOpenD 失败: {e}[/red]")
+        return
+    console.print("  已连接 FutuOpenD\n")
+
+    stmt_filter = None
+    if args.statements and args.statements != "all":
+        stmt_filter = {s.strip() for s in args.statements.split(",")}
+
+    start_time = time.time()
+    lock = threading.Lock()
+    api_lock = threading.Lock()
+
+    success_results: list[StockResult] = []
+    fail_results: list[StockResult] = []
+    stats: dict[str, int] = {
+        "fd_inserted": 0,
+        "fd_skipped": 0,
+        "fd_error": 0,
+        "meta_inserted": 0,
+        "meta_updated": 0,
+        "meta_error": 0,
+    }
+
+    progress_table = Table(
+        show_header=True, header_style="bold cyan", box=None, padding=(0, 1)
+    )
+    progress_table.add_column("#", justify="right", width=5)
+    progress_table.add_column("Ticker", width=12)
+    progress_table.add_column("Currency", width=8)
+    progress_table.add_column("Rows", justify="right", width=6)
+    progress_table.add_column("FY Range", width=11)
+    progress_table.add_column("Max FP", width=8)
+
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        futures = {
+            executor.submit(
+                process_one_stock,
+                ctx,
+                api_lock,
+                lock,
+                i,
+                total,
+                args.quiet,
+                stock,
+                stmt_filter,
+                args.interval,
+                args.dry_run,
+            ): stock
+            for i, stock in enumerate(stocks, 1)
+        }
+
+        for future in as_completed(futures):
+            result = future.result()
+            with lock:
+                if result.ok:
+                    success_results.append(result)
+                    stats["fd_inserted"] += result.fd_inserted
+                    stats["fd_skipped"] += result.fd_skipped
+                    stats["fd_error"] += result.fd_error
+                    if not args.dry_run:
+                        stats["meta_" + result.meta_result] = (
+                            stats.get("meta_" + result.meta_result, 0) + 1
+                        )
+                else:
+                    fail_results.append(result)
+
+                done = len(success_results) + len(fail_results)
+                if not args.quiet and result.ok:
+                    fy_range = f"{result.min_fy}-{result.max_fy}"
+                    progress_table.add_row(
+                        str(done),
+                        result.ticker,
+                        result.currency,
+                        str(result.row_count),
+                        fy_range,
+                        result.max_fp,
+                    )
 
     ctx.close()
-
-    if not args.quiet:
-        console.print(progress_table)
-
     elapsed = time.time() - start_time
 
-    if args.quiet:
-        console.print(
-            f"  抓取完成: {ok_count} 只 "
-            f"(fd: +{stats['fd_inserted']} ={stats['fd_skipped']} x{stats['fd_error']} | "
-            f"meta: +{stats['meta_inserted']} ~{stats['meta_updated']} x{stats['meta_error']} | "
-            f"{elapsed / 60:.1f}m)"
-        )
-    else:
+    if not args.quiet:
+        success_results.sort(key=lambda r: r.ticker)
+        fail_results.sort(key=lambda r: r.ticker)
+
+        console.print(progress_table)
+
         summary = Table(
             title="抓取完成", show_header=True, header_style="bold", box=None
         )
         summary.add_column("项目", style="bold")
         summary.add_column("值")
-        summary.add_row("成功", f"{ok_count:,}")
-        summary.add_row("失败", f"{fail_count:,}")
+        summary.add_row("成功", f"{len(success_results):,}")
+        summary.add_row("失败", f"{len(fail_results):,}")
         summary.add_row(
             "字段定义",
             f"新增 {stats['fd_inserted']}  跳过 {stats['fd_skipped']}  错误 {stats['fd_error']}",
@@ -307,6 +396,25 @@ def run(args: argparse.Namespace) -> None:
         console.print()
         console.print(summary)
 
+        if fail_results:
+            fail_table = Table(
+                title="失败列表", show_header=True, header_style="bold red", box=None
+            )
+            fail_table.add_column("Ticker", width=12)
+            fail_table.add_column("Error")
+            for r in fail_results:
+                fail_table.add_row(r.ticker, r.error_msg[:60])
+            console.print()
+            console.print(fail_table)
+    else:
+        console.print(
+            f"  抓取完成: {len(success_results)} 只 "
+            f"(fd: +{stats['fd_inserted']} ={stats['fd_skipped']} x{stats['fd_error']} | "
+            f"meta: +{stats['meta_inserted']} ~{stats['meta_updated']} x{stats['meta_error']} | "
+            f"fail: {len(fail_results)} | "
+            f"{elapsed / 60:.1f}m)"
+        )
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="美股财报抓取 (累计季报)")
@@ -317,6 +425,9 @@ def parse_args() -> argparse.Namespace:
         help="逗号分隔的 ticker 列表 (e.g. AAPL,MSFT)",
     )
     p.add_argument("--max-stocks", type=int, default=0, help="最多处理 N 只 (0=不限)")
+    p.add_argument(
+        "--workers", type=int, default=3, help="并发线程数 (默认 3, 最大 10)"
+    )
     p.add_argument(
         "--statements",
         type=str,
@@ -335,6 +446,8 @@ def parse_args() -> argparse.Namespace:
 
     if args.tickers and args.max_stocks:
         p.error("--tickers 和 --max-stocks 不能同时使用")
+    if args.workers < 1 or args.workers > 10:
+        p.error("--workers 范围 1-10")
     return args
 
 
