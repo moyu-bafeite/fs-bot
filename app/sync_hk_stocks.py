@@ -7,7 +7,8 @@ import re
 import httpx
 
 from lib.db import upsert_stocks
-from lib.hkex import HKEX_STOCK_LIST_URL
+
+HKEX_STOCK_LIST_URL = "https://www1.hkexnews.hk/ncms/script/eds/activestock_sehk_e.json"
 
 _EXCLUDE_KEYWORDS = re.compile(
     r"ETF|REIT|FUND|TRUST|BOND|NOTE|TBILL|GILT", re.IGNORECASE
@@ -20,9 +21,7 @@ def _is_main_board_equity(code: str, name: str) -> bool:
         return False
     if code[:2] in ("04", "05", "07"):
         return False
-    if _EXCLUDE_KEYWORDS.search(name):
-        return False
-    return True
+    return not _EXCLUDE_KEYWORDS.search(name)
 
 
 def sync() -> int:

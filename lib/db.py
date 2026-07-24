@@ -1,4 +1,4 @@
-"""Supabase Postgres 操作：filings、sehk_active_stocks、filing_logs。"""
+"""Supabase Postgres 操作：sehk_active_stocks、us_active_stocks。"""
 
 from __future__ import annotations
 
@@ -11,69 +11,12 @@ _url = os.environ["SUPABASE_URL"]
 _key = os.environ["SUPABASE_PUBLISHABLE_KEY"]
 _client = create_client(_url, _key, ClientOptions(schema="meta_data"))
 
-FILINGS_TABLE = "filings"
 STOCKS_TABLE = "sehk_active_stocks"
-LOG_TABLE = "filing_logs"
-EXCLUDE_KEYWORDS_TABLE = "filing_excluded_keywords"
+US_STOCKS_TABLE = "us_active_stocks"
 
 
 def _table(name: str):
     return _client.table(name)
-
-
-def upsert_filings(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """批量 upsert filings 记录，基于 news_id 去重。返回插入/更新的记录。"""
-    if not records:
-        return []
-    resp = _table(FILINGS_TABLE).upsert(records, on_conflict="news_id").execute()
-    return resp.data
-
-
-def get_pending_filings(
-    stock_code: str | None = None, limit: int = 50
-) -> list[dict[str, Any]]:
-    """查询 status='pending' 的记录。"""
-    query = _table(FILINGS_TABLE).select("*").eq("status", "pending").limit(limit)
-    if stock_code:
-        query = query.eq("stock_code", stock_code)
-    resp = query.execute()
-    return resp.data
-
-
-def update_filing_status(
-    filing_id: int,
-    status: str,
-    pdf_path: str | None = None,
-) -> dict[str, Any] | None:
-    """更新单条 filing 的状态和 pdf_path。"""
-    data: dict[str, Any] = {"status": status}
-    if pdf_path is not None:
-        data["pdf_path"] = pdf_path
-    resp = _table(FILINGS_TABLE).update(data).eq("id", filing_id).execute()
-    return resp.data[0] if resp.data else None
-
-
-def log_error(
-    action: str,
-    message: str,
-    *,
-    filing_id: int | None = None,
-    stock_code: str | None = None,
-    details: dict[str, Any] | None = None,
-) -> None:
-    """写入一条错误日志到 filing_logs。"""
-    record: dict[str, Any] = {
-        "action": action,
-        "message": message,
-        "level": "error",
-    }
-    if filing_id is not None:
-        record["filing_id"] = filing_id
-    if stock_code is not None:
-        record["stock_code"] = stock_code
-    if details is not None:
-        record["details"] = details
-    _table(LOG_TABLE).insert(record).execute()
 
 
 def upsert_stocks(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -84,75 +27,40 @@ def upsert_stocks(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return resp.data
 
 
-def get_stock_id_map_from_db() -> dict[str, int]:
-    """从 DB 读取 stock_code → hkex_id 映射（分页查询全量数据）。"""
-    all_rows: list[dict[str, Any]] = []
+def upsert_us_stocks(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """批量 upsert 美股记录，基于 ticker 去重。"""
+    if not records:
+        return []
+    resp = _table(US_STOCKS_TABLE).upsert(records, on_conflict="ticker").execute()
+    return resp.data
+
+
+def get_existing_us_tickers() -> set[str]:
+    """获取 us_active_stocks 中已有的 ticker 集合。"""
+    all_tickers: set[str] = set()
     page_size = 1000
     offset = 0
     while True:
         resp = (
-            _table(STOCKS_TABLE)
-            .select("stock_code, hkex_id")
+            _table(US_STOCKS_TABLE)
+            .select("ticker")
             .range(offset, offset + page_size - 1)
             .execute()
         )
-        all_rows.extend(resp.data)
+        all_tickers.update(row["ticker"] for row in resp.data)
         if len(resp.data) < page_size:
             break
         offset += page_size
-    return {row["stock_code"]: row["hkex_id"] for row in all_rows}
+    return all_tickers
 
 
-def get_latest_filing_date(stock_code: str) -> str | None:
-    """获取指定股票最新的 filing_date，返回 YYYY-MM-DD 字符串或 None。"""
-    resp = (
-        _table(FILINGS_TABLE)
-        .select("filing_date")
-        .eq("stock_code", stock_code)
-        .order("filing_date", desc=True)
-        .limit(1)
-        .execute()
-    )
-    if resp.data:
-        return resp.data[0]["filing_date"]
-    return None
-
-
-def get_excluded_keywords() -> list[str]:
-    """获取已启用的排除关键词列表。"""
-    resp = (
-        _table(EXCLUDE_KEYWORDS_TABLE).select("keyword").eq("enabled", True).execute()
-    )
-    return [row["keyword"] for row in resp.data]
-
-
-def get_filings_by_keywords(keywords: list[str]) -> list[dict[str, Any]]:
-    """查询标题匹配排除关键词的 filings 记录。"""
-    if not keywords:
-        return []
-    all_records: list[dict[str, Any]] = []
-    for kw in keywords:
-        resp = (
-            _table(FILINGS_TABLE)
-            .select(
-                "id, news_id, stock_code, title, filing_type, report_year, filing_date, file_url"
-            )
-            .ilike("title", f"%{kw}%")
-            .execute()
-        )
-        all_records.extend(resp.data)
-    seen: set[int] = set()
-    unique: list[dict[str, Any]] = []
-    for rec in all_records:
-        if rec["id"] not in seen:
-            seen.add(rec["id"])
-            unique.append(rec)
-    return unique
-
-
-def delete_filings_by_ids(ids: list[int]) -> int:
-    """按 ID 列表删除 filings 记录，返回删除数量。"""
-    if not ids:
-        return 0
-    resp = _table(FILINGS_TABLE).delete().in_("id", ids).execute()
-    return len(resp.data)
+def update_us_stock_profile(
+    ticker: str,
+    sector: str | None,
+    fiscal_month: int,
+    fiscal_day: int,
+) -> None:
+    """更新单条美股的 sector/fiscal_month/fiscal_day。"""
+    _table(US_STOCKS_TABLE).update(
+        {"sector": sector, "fiscal_month": fiscal_month, "fiscal_day": fiscal_day}
+    ).eq("ticker", ticker).execute()
