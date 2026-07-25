@@ -195,6 +195,12 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pyright" },
+    { name = "ruff" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "futu-api", specifier = ">=10.7" },
@@ -207,6 +213,12 @@ requires-dist = [
     { name = "supabase", specifier = ">=2.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright", specifier = ">=1.1.411" },
+    { name = "ruff", specifier = ">=0.15.22" },
+]
 
 [[package]]
 name = "futu-api"

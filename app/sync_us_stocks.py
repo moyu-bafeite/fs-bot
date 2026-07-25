@@ -1,4 +1,4 @@
-"""通过 Futu OpenD API 爬取美股市场未退市正股，写入 us_active_stocks 表。"""
+"""通过 Futu OpenD API 爬取美股三大交易所（NYSE/NASDAQ/AMEX）的股票和 ETF，写入 us_active_stocks 表。"""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import os
 import time
 
+import pandas as pd
 from futu import RET_OK, Market, OpenQuoteContext, SecurityType
 from rich.console import Console
 from rich.progress import track
@@ -19,6 +20,8 @@ from lib.db import (
 
 console = Console()
 
+VALID_EXCHANGES = {"US_NYSE", "US_NASDAQ", "US_AMEX"}
+
 
 def build_arg_parser() -> argparse.ArgumentParser:
     """构建 CLI 参数解析器。"""
@@ -29,6 +32,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="全量模式：对所有股票获取公司概况（默认仅新增股票）",
     )
     return parser
+
+
+def _build_records(data: pd.DataFrame) -> list[dict]:
+    """从 get_stock_basicinfo 返回的 DataFrame 提取记录，过滤退市股和 OTC。"""
+    records: list[dict] = []
+    for _, row in data.iterrows():
+        if row["delisting"]:
+            continue
+        if row.get("exchange_type", "") not in VALID_EXCHANGES:
+            continue
+        listing_date = row.get("listing_date") or None
+        if listing_date == "":
+            listing_date = None
+        records.append(
+            {
+                "ticker": row["code"],
+                "company_name": row["name"],
+                "market": "US",
+                "security_type": row.get("stock_type", "STOCK"),
+                "listing_date": listing_date,
+                "futu_id": int(row["stock_id"]),
+            }
+        )
+    return records
 
 
 def _parse_fiscal_date(date_str: str) -> tuple[int, int]:
@@ -72,35 +99,40 @@ def sync(full: bool = False) -> int:
     console.print(f"连接 Futu OpenD ({host}:{port})...")
 
     with OpenQuoteContext(host=host, port=port) as quote_ctx:
-        # 1. 获取全量美股静态数据
-        console.print("正在获取美股静态数据...")
-        ret, data = quote_ctx.get_stock_basicinfo(Market.US, SecurityType.STOCK)
-        if ret != RET_OK:
-            raise RuntimeError(f"Futu API error: {data}")
-
-        console.print(f"API 返回 {len(data)} 条记录，过滤退市股票...")
-
-        # 2. 过滤退市股，构建记录
+        # 1. 获取全量美股静态数据（STOCK + ETF）
         all_records: list[dict] = []
-        for _, row in data.iterrows():
-            if row["delisting"]:
+
+        for sec_type, label in [
+            (SecurityType.STOCK, "STOCK"),
+            (SecurityType.ETF, "ETF"),
+        ]:
+            console.print(f"正在获取美股 {label} 数据...")
+            ret, data = quote_ctx.get_stock_basicinfo(Market.US, sec_type)
+            if ret != RET_OK:
+                console.print(f"  [yellow]API 错误 ({label}): {data}[/yellow]")
                 continue
-            listing_date = row.get("listing_date") or None
-            if listing_date == "":
-                listing_date = None
-            all_records.append(
-                {
-                    "ticker": row["code"],
-                    "company_name": row["name"],
-                    "market": "US",
-                    "listing_date": listing_date,
-                    "futu_id": int(row["stock_id"]),
-                }
+
+            batch = _build_records(data)  # type: ignore[arg-type]
+            console.print(
+                f"  {label}: API 返回 {len(data)} 条, 三大交易所过滤后 {len(batch)} 条"
             )
+            all_records.extend(batch)
 
-        console.print(f"过滤后剩余 {len(all_records)} 只未退市正股")
+        # 去重（同一 ticker 可能同时出现在 STOCK 和 ETF 中）
+        seen: dict[str, dict] = {}
+        for r in all_records:
+            t = r["ticker"]
+            if t not in seen or r["security_type"] == "STOCK":
+                seen[t] = r
+        all_records = list(seen.values())
 
-        # 3. 查询已有记录，判断新增
+        stock_count = sum(1 for r in all_records if r["security_type"] == "STOCK")
+        etf_count = sum(1 for r in all_records if r["security_type"] == "ETF")
+        console.print(
+            f"去重后共 {len(all_records)} 条 (STOCK: {stock_count}, ETF: {etf_count})"
+        )
+
+        # 2. 查询已有记录，判断新增
         existing_tickers = get_existing_us_tickers()
         new_tickers = {r["ticker"] for r in all_records} - existing_tickers
         console.print(f"已有 {len(existing_tickers)} 只，新增 {len(new_tickers)} 只")
@@ -118,7 +150,7 @@ def sync(full: bool = False) -> int:
             tickers_for_profile = sorted(new_tickers)
             if not tickers_for_profile:
                 console.print("[green]无新增股票，跳过公司概况获取[/green]")
-                _print_summary(all_records, len(new_tickers), 0)
+                _print_summary(all_records, len(new_tickers), 0, [])
                 return len(all_records)
             console.print(
                 f"[bold]增量模式[/bold]：将为 {len(tickers_for_profile)} 只新增股票获取公司概况..."
@@ -150,10 +182,14 @@ def _print_summary(
     failed: list[str],
 ) -> None:
     """打印同步结果摘要。"""
+    stock_count = sum(1 for r in records if r["security_type"] == "STOCK")
+    etf_count = sum(1 for r in records if r["security_type"] == "ETF")
     table = Table(title="美股同步结果")
     table.add_column("指标", style="cyan")
     table.add_column("数量", style="green", justify="right")
-    table.add_row("未退市正股总数", str(len(records)))
+    table.add_row("STOCK", str(stock_count))
+    table.add_row("ETF", str(etf_count))
+    table.add_row("合计", str(len(records)))
     table.add_row("新增写入", str(new_count))
     table.add_row("公司概况更新", str(profile_updated))
     table.add_row("失败", str(len(failed)), style="red" if failed else "green")
