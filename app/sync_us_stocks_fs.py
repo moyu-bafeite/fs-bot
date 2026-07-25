@@ -17,7 +17,7 @@ from rich.table import Table
 from lib.db import (
     check_field_def_conflicts,
     get_pending_stocks,
-    get_stock_by_ticker,
+    get_stocks_by_tickers,
     insert_financial_items,
     upsert_field_defs_batch,
     upsert_us_fs_metadata,
@@ -90,14 +90,12 @@ class StockResult:
 def get_stock_list(args: argparse.Namespace) -> list[dict]:
     if args.tickers:
         tickers = [t.strip() for t in args.tickers.split(",") if t.strip()]
-        result: list[dict] = []
+        stocks = get_stocks_by_tickers(tickers)
+        found = {s["ticker"] for s in stocks}
         for t in tickers:
-            row = get_stock_by_ticker(t)
-            if row:
-                result.append(row)
-            else:
-                console.print(f"  [yellow]ticker 不在 stocks 表中: {t}[/yellow]")
-        return result
+            if t not in found:
+                console.print(f"  [yellow]ticker 不在 us_active_stocks 表中: {t}[/yellow]")
+        return stocks
     return get_pending_stocks()
 
 

@@ -322,7 +322,7 @@ def _fetch_all_pub_stocks() -> list[dict[str, Any]]:
 
 
 def get_stock_by_ticker(ticker: str) -> dict[str, Any] | None:
-    """查询单只美股（public.stocks, market=US）。"""
+    """查询单只美股（meta_data.us_active_stocks）。"""
     resp = (
         _meta_client.table("us_active_stocks")
         .select("id,ticker,company_name")
@@ -331,3 +331,19 @@ def get_stock_by_ticker(ticker: str) -> dict[str, Any] | None:
         .execute()
     )
     return resp.data[0] if resp.data else None
+
+
+def get_stocks_by_tickers(tickers: list[str]) -> list[dict[str, Any]]:
+    """批量查询美股（meta_data.us_active_stocks）。"""
+    result: list[dict[str, Any]] = []
+    batch_size = 500
+    for i in range(0, len(tickers), batch_size):
+        batch = tickers[i : i + batch_size]
+        resp = (
+            _meta_client.table("us_active_stocks")
+            .select("id,ticker,company_name")
+            .in_("ticker", batch)
+            .execute()
+        )
+        result.extend(resp.data or [])
+    return result
