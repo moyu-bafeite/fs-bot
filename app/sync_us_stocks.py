@@ -54,10 +54,7 @@ def _fetch_company_profile(
     for _, row in data.iterrows():
         name = row["name"]
         value = row["value"]
-        if name == "所属市场":
-            # 所属市场不是 sector，但暂无更好的 sector 来源
-            pass
-        elif name == "年结日" and value:
+        if name in ("Fiscal Year Ends", "年结日") and value:
             fiscal_month, fiscal_day = _parse_fiscal_date(value)
 
     return sector, fiscal_month, fiscal_day
