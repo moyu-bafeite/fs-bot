@@ -56,7 +56,9 @@ def show(args: argparse.Namespace) -> None:
 
     # 构建单一表格
     title = args.ticker.upper()
-    table = Table(title=title, show_header=True, header_style="bold cyan", box=box.ROUNDED)
+    table = Table(
+        title=title, show_header=True, header_style="bold cyan", box=box.ROUNDED
+    )
     table.add_column("报表 / 字段", style="bold", min_width=30)
     for y in years:
         table.add_column(str(y), justify="right", min_width=14)
@@ -70,7 +72,11 @@ def show(args: argparse.Namespace) -> None:
             table.add_row(*["─" * 30] + ["─" * 14] * len(years), style="dim")
 
         # 报表标题行
-        stmt_label = {"income": "利润表", "balance_sheet": "资产负债表", "cash_flow": "现金流量表"}
+        stmt_label = {
+            "income": "利润表",
+            "balance_sheet": "资产负债表",
+            "cash_flow": "现金流量表",
+        }
         table.add_row(
             f"[bold blue]{stmt_label.get(stmt, stmt)}[/bold blue]",
             *[""] * len(years),
@@ -93,7 +99,9 @@ def show(args: argparse.Namespace) -> None:
         sorted_fids = sorted(field_years.keys())
 
         # 合并 - 开头的字段到最近的非 - 字段（仅视觉分组，不累加数值）
-        merged: list[tuple[str, dict[int, float], list[tuple[str, dict[int, float]]]]] = []
+        merged: list[
+            tuple[str, dict[int, float], list[tuple[str, dict[int, float]]]]
+        ] = []
         for fid in sorted_fids:
             name = field_names.get(fid, str(fid))
             yv = field_years[fid]

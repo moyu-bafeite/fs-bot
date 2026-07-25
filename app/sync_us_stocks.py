@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 from futu import RET_OK, Market, OpenQuoteContext, SecurityType
 from rich.console import Console
-from rich.progress import track
 from rich.table import Table
 
 from lib.db import (
@@ -31,6 +33,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="全量模式：对所有股票获取公司概况（默认仅新增股票）",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=3,
+        help="并发线程数（默认 3，最多 10）",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=1.1,
+        help="API 调用间隔秒数（默认 1.1）",
+    )
     return parser
 
 
@@ -49,7 +63,7 @@ def _build_records(data: pd.DataFrame) -> list[dict]:
             {
                 "ticker": row["code"],
                 "company_name": row["name"],
-                "market": "US",
+                "market": row.get("exchange_type", "US"),
                 "security_type": row.get("stock_type", "STOCK"),
                 "listing_date": listing_date,
                 "futu_id": int(row["stock_id"]),
@@ -87,11 +101,30 @@ def _fetch_company_profile(
     return sector, fiscal_month, fiscal_day
 
 
-def sync(full: bool = False) -> int:
+def _process_one_profile(
+    quote_ctx: OpenQuoteContext,
+    api_lock: threading.Lock,
+    ticker: str,
+    interval: float,
+) -> tuple[str, bool, str]:
+    """获取单只股票的公司概况并写库。返回 (ticker, ok, error_msg)。"""
+    try:
+        with api_lock:
+            sector, fiscal_month, fiscal_day = _fetch_company_profile(quote_ctx, ticker)
+        time.sleep(interval)
+        update_us_stock_profile(ticker, sector, fiscal_month, fiscal_day)
+        return ticker, True, ""
+    except Exception as e:  # noqa: BLE001
+        return ticker, False, str(e)
+
+
+def sync(full: bool = False, workers: int = 3, interval: float = 1.1) -> int:
     """同步美股列表，返回写入记录数。
 
     Args:
         full: True 时对所有股票调用 get_company_profile；False 仅对新增股票调用。
+        workers: 并发线程数。
+        interval: API 调用间隔秒数。
     """
     host = os.environ.get("FUTU_OPEND_HOST", "127.0.0.1")
     port = int(os.environ.get("FUTU_OPEND_PORT", "11111"))
@@ -156,20 +189,38 @@ def sync(full: bool = False) -> int:
                 f"[bold]增量模式[/bold]：将为 {len(tickers_for_profile)} 只新增股票获取公司概况..."
             )
 
-        # 6. 逐个调用 get_company_profile
+        # 6. 多线程并行获取 company_profile
+        total = len(tickers_for_profile)
         updated = 0
         failed: list[str] = []
-        for ticker in track(tickers_for_profile, description="获取公司概况..."):
-            try:
-                sector, fiscal_month, fiscal_day = _fetch_company_profile(
-                    quote_ctx, ticker
-                )
-                update_us_stock_profile(ticker, sector, fiscal_month, fiscal_day)
-                updated += 1
-            except Exception as e:  # noqa: BLE001
-                failed.append(f"{ticker} ({e})")
-            # rate limit: 30次/30秒
-            time.sleep(1.1)
+        api_lock = threading.Lock()
+        print_lock = threading.Lock()
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(
+                    _process_one_profile, quote_ctx, api_lock, ticker, interval
+                ): ticker
+                for ticker in tickers_for_profile
+            }
+
+            for future in as_completed(futures):
+                ticker, ok, error_msg = future.result()
+                if ok:
+                    updated += 1
+                else:
+                    failed.append(f"{ticker} ({error_msg})")
+
+                with print_lock:
+                    done = updated + len(failed)
+                    pct = done / total * 100
+                    sys.stdout.write(
+                        f"\r已完成 {done}/{total} ({pct:.1f}%)   成功: {updated}   失败: {len(failed)}"
+                    )
+                    sys.stdout.flush()
+
+        # 换行，结束进度行
+        console.print()
 
     _print_summary(all_records, len(new_tickers), updated, failed)
     return len(all_records)

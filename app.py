@@ -44,7 +44,7 @@ def main() -> None:
             sub.print_help()
             return
         opts = sub.parse_args(remaining)
-        count = sync(opts.full)
+        count = sync(full=opts.full, workers=opts.workers, interval=opts.interval)
         print(f"完成，共写入 {count} 条美股记录")
 
     elif args.type == "sync-us-fs":
