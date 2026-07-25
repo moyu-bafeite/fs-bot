@@ -72,7 +72,7 @@ def show(args: argparse.Namespace) -> None:
         # 报表标题行
         stmt_label = {"income": "利润表", "balance_sheet": "资产负债表", "cash_flow": "现金流量表"}
         table.add_row(
-            f"[bold white]{stmt_label.get(stmt, stmt)}[/bold white]",
+            f"[bold blue]{stmt_label.get(stmt, stmt)}[/bold blue]",
             *[""] * len(years),
         )
 

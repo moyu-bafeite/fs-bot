@@ -26,9 +26,9 @@ from lib.db import (
 console = Console()
 
 STATEMENT_CONFIG = [
-    (1, "income"),
-    (2, "balance_sheet"),
-    (3, "cash_flow"),
+    (1, "income", [11]),
+    (2, "balance_sheet", [9]),
+    (3, "cash_flow", [11]),
 ]
 
 F10_TO_PERIOD = {
@@ -63,7 +63,12 @@ MAX_FP_ORDER = {
     "ANNUAL": 4,
 }
 
-FTYPES_MUL_QUARTERLY = [11]
+BS_FTYPE_TO_PERIOD = {
+    1: "q1",
+    2: "h1",
+    3: "9m",
+    4: "annual",
+}
 
 
 @dataclass
@@ -99,19 +104,12 @@ def get_stock_list(args: argparse.Namespace) -> list[dict]:
 def fetch_reports(
     ctx: ft.OpenQuoteContext,
     ticker: str,
-    financial_types: list[int],
-    statement_filter: set[str] | None,
     interval: float,
 ) -> list[tuple[str, dict]]:
     tagged: list[tuple[str, dict]] = []
-    st_config = [
-        (t, k)
-        for t, k in STATEMENT_CONFIG
-        if statement_filter is None or k in statement_filter
-    ]
 
-    for st_type, st_key in st_config:
-        for fin_type in financial_types:
+    for st_type, st_key, fin_types in STATEMENT_CONFIG:
+        for fin_type in fin_types:
             next_key = None
             while True:
                 ret, data = ctx.get_financials_statements(
@@ -141,7 +139,10 @@ def reports_to_rows(tagged: list[tuple[str, dict]]) -> list[dict]:
         if not fy:
             continue
         ftype = report.get("financial_type", 10)
-        period = F10_TO_PERIOD.get(ftype, "annual")
+        if st_key == "balance_sheet":
+            period = BS_FTYPE_TO_PERIOD.get(ftype, "annual")
+        else:
+            period = F10_TO_PERIOD.get(ftype, "annual")
         for item in report.get("item_list", []):
             fid = item.get("field_id")
             if fid is None:
@@ -174,7 +175,6 @@ def process_one_stock(
     total: int,
     quiet: bool,
     stock: dict,
-    stmt_filter: set[str] | None,
     interval: float,
     dry_run: bool,
 ) -> StockResult:
@@ -188,9 +188,7 @@ def process_one_stock(
 
     try:
         with api_lock:
-            tagged = fetch_reports(
-                ctx, ticker, FTYPES_MUL_QUARTERLY, stmt_filter, interval
-            )
+            tagged = fetch_reports(ctx, ticker, interval)
 
         if not tagged:
             raise ValueError("无数据")
@@ -292,10 +290,6 @@ def run(args: argparse.Namespace) -> None:
         return
     console.print("  已连接 FutuOpenD\n")
 
-    stmt_filter = None
-    if args.statements and args.statements != "all":
-        stmt_filter = {s.strip() for s in args.statements.split(",")}
-
     start_time = time.time()
     lock = threading.Lock()
     api_lock = threading.Lock()
@@ -332,7 +326,6 @@ def run(args: argparse.Namespace) -> None:
                 total,
                 args.quiet,
                 stock,
-                stmt_filter,
                 args.interval,
                 args.dry_run,
             ): stock
@@ -422,17 +415,11 @@ def parse_args() -> argparse.Namespace:
         "--tickers",
         type=str,
         default=None,
-        help="逗号分隔的 ticker 列表 (e.g. AAPL,MSFT)",
+        help="逗号分隔的 ticker 列表 (e.g. US.AAPL,US.MSFT)",
     )
     p.add_argument("--max-stocks", type=int, default=0, help="最多处理 N 只 (0=不限)")
     p.add_argument(
         "--workers", type=int, default=3, help="并发线程数 (默认 3, 最大 10)"
-    )
-    p.add_argument(
-        "--statements",
-        type=str,
-        default="all",
-        help="逗号分隔: income,balance_sheet,cash_flow (默认 all)",
     )
     p.add_argument(
         "--interval", type=float, default=1.5, help="API 调用间隔秒数 (默认 1.5)"
