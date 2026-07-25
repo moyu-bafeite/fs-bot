@@ -16,7 +16,7 @@ def main() -> None:
     parser.add_argument(
         "type",
         nargs="?",
-        choices=["sync-hk-stocks", "sync-us-stocks", "sync-us-fs"],
+        choices=["sync-hk-stocks", "sync-us-stocks", "sync-us-fs", "show-fs"],
         help="任务类型",
     )
     parser.add_argument("-h", "--help", action="store_true")
@@ -61,6 +61,11 @@ def main() -> None:
             fs_main()
         finally:
             sys.argv = old_argv
+
+    elif args.type == "show-fs":
+        from app.show_fs import main as show_main
+
+        show_main(remaining)
 
 
 if __name__ == "__main__":

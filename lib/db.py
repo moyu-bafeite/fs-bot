@@ -245,6 +245,54 @@ def upsert_us_fs_metadata(
         return "error"
 
 
+def get_fs_items(
+    ticker: str,
+    fiscal_years: list[int],
+    fiscal_period: str,
+    statement: str | None = None,
+) -> list[dict[str, Any]]:
+    """查询 us_fs_items + us_field_definitions，返回带 display_name 的行。"""
+    # 查财报数据
+    q = (
+        _fd_client.table("us_fs_items")
+        .select("fiscal_year,fiscal_period,statement,field_id,value")
+        .eq("ticker", ticker)
+        .eq("fiscal_period", fiscal_period)
+        .in_("fiscal_year", fiscal_years)
+    )
+    if statement:
+        q = q.eq("statement", statement)
+    resp = q.execute()
+    items = resp.data or []
+    if not items:
+        return []
+
+    # 查字段定义
+    unique_keys = {(r["field_id"], r["statement"]) for r in items}
+    field_defs: dict[tuple[int, str], dict[str, Any]] = {}
+    for fid, stmt in unique_keys:
+        try:
+            dresp = (
+                _fd_client.table("us_field_definitions")
+                .select("field_id,statement,display_name")
+                .eq("field_id", fid)
+                .eq("statement", stmt)
+                .limit(1)
+                .execute()
+            )
+            if dresp.data:
+                row = dresp.data[0]
+                field_defs[(fid, stmt)] = row.get("display_name", {})
+        except Exception:
+            pass
+
+    # 合并 display_name
+    for r in items:
+        r["display_name"] = field_defs.get((r["field_id"], r["statement"]), {})
+
+    return items
+
+
 def get_pending_stocks() -> list[dict[str, Any]]:
     """返回 public.stocks 中 market=US 的全部记录。"""
     return _fetch_all_pub_stocks()
