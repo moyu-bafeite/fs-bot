@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import os
+import time
 from datetime import datetime
 from typing import Any
 
@@ -16,6 +18,26 @@ _pub_client = create_client(_url, _key)
 
 STOCKS_TABLE = "sehk_active_stocks"
 US_STOCKS_TABLE = "us_active_stocks"
+
+
+def _retry(max_attempts: int = 3, backoff: float = 1.0):
+    """指数退避重试装饰器，处理网络断连和 Cloudflare 限流。"""
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except Exception:
+                    if attempt == max_attempts - 1:
+                        raise
+                    time.sleep(backoff * (2**attempt))
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def _table(name: str):
@@ -72,6 +94,7 @@ def update_us_stock_profile(
 # ── financial_data 操作 ──
 
 
+@_retry()
 def insert_financial_items(rows: list[dict[str, Any]]) -> int:
     """批量 upsert us_fs_items（ON CONFLICT 跳过重复）。"""
     if not rows:
@@ -103,6 +126,7 @@ def insert_financial_items(rows: list[dict[str, Any]]) -> int:
     return inserted
 
 
+@_retry()
 def upsert_field_defs_batch(
     defs: dict[tuple[int, str], dict[str, Any]],
 ) -> dict[str, int]:
@@ -165,6 +189,7 @@ def upsert_field_defs_batch(
     return stats
 
 
+@_retry()
 def check_field_def_conflicts(defs: dict[tuple[int, str], dict[str, Any]]) -> None:
     """检查 us_field_definitions 冲突——仅对已有条目做 SELECT 比对，最多查 50 条。"""
     conflicts: list[str] = []
@@ -197,6 +222,7 @@ def check_field_def_conflicts(defs: dict[tuple[int, str], dict[str, Any]]) -> No
             print(c)
 
 
+@_retry()
 def upsert_us_fs_metadata(
     ticker: str,
     currency: str,
@@ -293,6 +319,7 @@ def get_fs_items(
     return items
 
 
+@_retry()
 def get_pending_stocks() -> list[dict[str, Any]]:
     """返回 public.stocks 中 market=US 的全部记录。"""
     return _fetch_all_pub_stocks()
@@ -333,6 +360,7 @@ def get_stock_by_ticker(ticker: str) -> dict[str, Any] | None:
     return resp.data[0] if resp.data else None
 
 
+@_retry()
 def get_stocks_by_tickers(tickers: list[str]) -> list[dict[str, Any]]:
     """批量查询美股（meta_data.us_active_stocks）。"""
     result: list[dict[str, Any]] = []
