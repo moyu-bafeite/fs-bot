@@ -100,6 +100,7 @@ def insert_financial_items(rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
     inserted = 0
+    last_error: Exception | None = None
     batch_size = 200
     for i in range(0, len(rows), batch_size):
         batch = rows[i : i + batch_size]
@@ -121,8 +122,10 @@ def insert_financial_items(rows: list[dict[str, Any]]) -> int:
                         on_conflict="ticker,fiscal_year,fiscal_period,statement,field_id",
                     ).execute()
                     inserted += 1
-                except Exception as inner_e:
-                    print(f"  [WARN] insert_financial_items 单行失败: {inner_e}")
+                except Exception as e:
+                    last_error = e
+    if last_error and inserted < len(rows):
+        raise last_error
     return inserted
 
 
@@ -161,6 +164,7 @@ def upsert_field_defs_batch(
             pass
 
     batch_size = 100
+    last_error: Exception | None = None
     for i in range(0, len(rows), batch_size):
         batch = rows[i : i + batch_size]
         try:
@@ -175,9 +179,12 @@ def upsert_field_defs_batch(
                         r,
                         on_conflict="field_id,statement",
                     ).execute()
-                except Exception as inner_e:
-                    print(f"  [WARN] upsert_field_defs_batch 单行失败: {inner_e}")
+                except Exception as e:
+                    last_error = e
                     stats["error"] += 1
+
+    if last_error and stats["error"] > 0:
+        raise last_error
 
     for r in rows:
         key = (r["field_id"], r["statement"])
