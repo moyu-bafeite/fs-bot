@@ -6,8 +6,6 @@ import argparse
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -20,7 +18,14 @@ def main() -> None:
         help="任务类型",
     )
     parser.add_argument("-h", "--help", action="store_true")
+    parser.add_argument(
+        "--env",
+        choices=["dev", "prod"],
+        default="dev",
+        help="环境（dev=.env.dev, prod=.env.prod）",
+    )
     args, remaining = parser.parse_known_args()
+    load_dotenv(f".env.{args.env}")
 
     if args.help and args.type is None:
         parser.print_help()
