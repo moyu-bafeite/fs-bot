@@ -14,7 +14,13 @@ def main() -> None:
     parser.add_argument(
         "type",
         nargs="?",
-        choices=["sync-hk-stocks", "sync-us-stocks", "sync-us-fs", "show-fs"],
+        choices=[
+            "sync-hk-stocks",
+            "sync-us-stocks",
+            "fetch-us-fs",
+            "push-us-fs",
+            "show-fs",
+        ],
         help="任务类型",
     )
     parser.add_argument("-h", "--help", action="store_true")
@@ -52,18 +58,33 @@ def main() -> None:
         count = sync(full=opts.full, workers=opts.workers, interval=opts.interval)
         print(f"完成，共写入 {count} 条美股记录")
 
-    elif args.type == "sync-us-fs":
+    elif args.type == "fetch-us-fs":
         import sys
 
-        from app.sync_us_stocks_fs import main as fs_main
+        from app.fetch_us_fs import main as fetch_main
 
         old_argv = sys.argv
         try:
             if args.help:
-                sys.argv = ["sync-us-fs", "--help"]
+                sys.argv = ["fetch-us-fs", "--help"]
             else:
-                sys.argv = ["sync-us-fs"] + remaining
-            fs_main()
+                sys.argv = ["fetch-us-fs"] + remaining
+            fetch_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "push-us-fs":
+        import sys
+
+        from app.push_us_fs import main as push_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["push-us-fs", "--help"]
+            else:
+                sys.argv = ["push-us-fs"] + remaining
+            push_main()
         finally:
             sys.argv = old_argv
 

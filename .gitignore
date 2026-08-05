@@ -13,6 +13,8 @@ requirements.txt
 *.env
 
 .DS_Store
+logs/
+data/
 
 # MiMoCode
 .mimocode/node_modules/

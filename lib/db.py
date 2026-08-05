@@ -95,105 +95,44 @@ def update_us_stock_profile(
 
 
 @_retry()
-def insert_financial_items(rows: list[dict[str, Any]]) -> int:
+def insert_financial_items(rows: list[dict[str, Any]], batch_size: int = 1000) -> int:
     """批量 upsert us_fs_items（ON CONFLICT 跳过重复）。"""
     if not rows:
         return 0
     inserted = 0
-    last_error: Exception | None = None
-    batch_size = 200
     for i in range(0, len(rows), batch_size):
         batch = rows[i : i + batch_size]
-        try:
-            resp = (
-                _fd_client.table("us_fs_items")
-                .upsert(
-                    batch,
-                    on_conflict="ticker,fiscal_year,fiscal_period,statement,field_id",
-                )
-                .execute()
+        resp = (
+            _fd_client.table("us_fs_items")
+            .upsert(
+                batch,
+                on_conflict="ticker,fiscal_year,fiscal_period,statement,field_id",
             )
-            inserted += len(resp.data or [])
-        except Exception:
-            for row in batch:
-                try:
-                    _fd_client.table("us_fs_items").upsert(
-                        row,
-                        on_conflict="ticker,fiscal_year,fiscal_period,statement,field_id",
-                    ).execute()
-                    inserted += 1
-                except Exception as e:
-                    last_error = e
-    if last_error and inserted < len(rows):
-        raise last_error
+            .execute()
+        )
+        inserted += len(resp.data or [])
     return inserted
 
 
 @_retry()
-def upsert_field_defs_batch(
-    defs: dict[tuple[int, str], dict[str, Any]],
-) -> dict[str, int]:
-    """批量写入 us_field_definitions。ON CONFLICT 跳过已有。
-
-    返回 {'inserted': N, 'skipped': N, 'conflict': N, 'error': N}
-    """
-    stats: dict[str, int] = {"inserted": 0, "skipped": 0, "conflict": 0, "error": 0}
-    if not defs:
-        return stats
-
-    rows = [
-        {"field_id": k[0], "statement": k[1], "display_name": v}
-        for k, v in defs.items()
-    ]
-
-    # 先查询已存在的 key 集合
-    existing_keys: set[tuple[int, str]] = set()
-    for r in rows:
-        try:
-            resp = (
-                _fd_client.table("us_field_definitions")
-                .select("field_id,statement")
-                .eq("field_id", r["field_id"])
-                .eq("statement", r["statement"])
-                .limit(1)
-                .execute()
-            )
-            if resp.data:
-                existing_keys.add((r["field_id"], r["statement"]))
-        except Exception:
-            pass
-
-    batch_size = 100
-    last_error: Exception | None = None
+def upsert_field_defs_batch(rows: list[dict[str, Any]], batch_size: int = 500) -> int:
+    """批量写入 us_field_definitions。ON CONFLICT IGNORE 跳过已有。"""
+    if not rows:
+        return 0
+    inserted = 0
     for i in range(0, len(rows), batch_size):
         batch = rows[i : i + batch_size]
-        try:
-            _fd_client.table("us_field_definitions").upsert(
+        resp = (
+            _fd_client.table("us_field_definitions")
+            .upsert(
                 batch,
                 on_conflict="field_id,statement",
-            ).execute()
-        except Exception:
-            for r in batch:
-                try:
-                    _fd_client.table("us_field_definitions").upsert(
-                        r,
-                        on_conflict="field_id,statement",
-                    ).execute()
-                except Exception as e:
-                    last_error = e
-                    stats["error"] += 1
-
-    if last_error and stats["error"] > 0:
-        raise last_error
-
-    for r in rows:
-        key = (r["field_id"], r["statement"])
-        if key in existing_keys:
-            stats["skipped"] += 1
-        else:
-            stats["inserted"] += 1
-
-    return stats
+                ignore_duplicates=True,
+            )
+            .execute()
+        )
+        inserted += len(resp.data or [])
+    return inserted
 
 
 @_retry()
@@ -236,46 +175,20 @@ def upsert_us_fs_metadata(
     min_fy: int,
     max_fy: int,
     max_fp: str,
-) -> str:
-    """写入/更新 us_fs_metadata。返回 'inserted' | 'updated' | 'error'。"""
-    try:
-        resp = (
-            _fd_client.table("us_fs_metadata")
-            .select("min_fy,max_fy,max_fp")
-            .eq("ticker", ticker)
-            .limit(1)
-            .execute()
-        )
-        if resp.data:
-            old = resp.data[0]
-            new_min = min(old.get("min_fy") or min_fy, min_fy)
-            new_max = max(old.get("max_fy") or max_fy, max_fy)
-            _fd_client.table("us_fs_metadata").update(
-                {
-                    "min_fy": new_min,
-                    "max_fy": new_max,
-                    "max_fp": max_fp,
-                    "currency": currency,
-                    "updated_at": datetime.now().isoformat(),
-                }
-            ).eq("ticker", ticker).execute()
-            return "updated"
-        else:
-            _fd_client.table("us_fs_metadata").insert(
-                {
-                    "ticker": ticker,
-                    "currency": currency,
-                    "min_fy": min_fy,
-                    "max_fy": max_fy,
-                    "max_fp": max_fp,
-                    "created_at": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat(),
-                }
-            ).execute()
-            return "inserted"
-    except Exception as e:
-        print(f"  [WARN] upsert_us_fs_metadata 失败: {e}")
-        return "error"
+) -> None:
+    """写入/更新 us_fs_metadata。调用方保证 min_fy/max_fy 已从磁盘全量计算。"""
+    now = datetime.now().isoformat()
+    _fd_client.table("us_fs_metadata").upsert(
+        {
+            "ticker": ticker,
+            "currency": currency,
+            "min_fy": min_fy,
+            "max_fy": max_fy,
+            "max_fp": max_fp,
+            "updated_at": now,
+        },
+        on_conflict="ticker",
+    ).execute()
 
 
 def get_fs_items(

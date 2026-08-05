@@ -10,6 +10,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "rich>=13.0",
     "futu-api>=10.7",
+    "pyrate-limiter>=4.4.0",
 ]
 
 [project.optional-dependencies]
