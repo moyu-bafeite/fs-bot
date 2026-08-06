@@ -203,6 +203,7 @@ def compute_metadata_from_disk(ticker_dir: Path) -> tuple[int, int, str]:
 
     if min_fy > max_fy:
         min_fy = max_fy = 0
+    min_fy = max(min_fy, 2010)
     max_fp_name = MAX_FP_TO_NAME.get(latest_fy_max_rank, "ANNUAL")
     return min_fy, max_fy, max_fp_name
 
