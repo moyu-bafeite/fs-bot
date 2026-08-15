@@ -20,6 +20,10 @@ def main() -> None:
             "fetch-us-fs",
             "push-us-fs",
             "show-fs",
+            "fetch-us-form4-index",
+            "parse-us-form4",
+            "push-us-form4",
+            "build-form4-defs",
         ],
         help="任务类型",
     )
@@ -92,6 +96,56 @@ def main() -> None:
         from app.show_fs import main as show_main
 
         show_main(remaining)
+
+    elif args.type == "fetch-us-form4-index":
+        import sys
+
+        from app.fetch_us_form4_index import main as fetch_index_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["fetch-us-form4-index", "--help"]
+            else:
+                sys.argv = ["fetch-us-form4-index"] + remaining
+            fetch_index_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "parse-us-form4":
+        import sys
+
+        from app.parse_us_form4 import main as parse_form4_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["parse-us-form4", "--help"]
+            else:
+                sys.argv = ["parse-us-form4"] + remaining
+            parse_form4_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "push-us-form4":
+        import sys
+
+        from app.push_us_form4 import main as push_form4_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["push-us-form4", "--help"]
+            else:
+                sys.argv = ["push-us-form4"] + remaining
+            push_form4_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "build-form4-defs":
+        from app.build_form4_defs import main as build_defs_main
+
+        build_defs_main()
 
 
 if __name__ == "__main__":

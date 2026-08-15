@@ -1,4 +1,4 @@
-"""Supabase Postgres 操作：meta_data / financial_data / public。"""
+"""Supabase Postgres 操作：meta_data / financial_data / market_data / public。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ _url = os.environ["SUPABASE_URL"]
 _key = os.environ["SUPABASE_PUBLISHABLE_KEY"]
 _meta_client = create_client(_url, _key, ClientOptions(schema="meta_data"))
 _fd_client = create_client(_url, _key, ClientOptions(schema="financial_data"))
+_md_client = create_client(_url, _key, ClientOptions(schema="market_data"))
 _pub_client = create_client(_url, _key)
 
 STOCKS_TABLE = "sehk_active_stocks"
@@ -294,4 +295,106 @@ def get_stocks_by_tickers(tickers: list[str]) -> list[dict[str, Any]]:
             .execute()
         )
         result.extend(resp.data or [])
+    return result
+
+
+# ── Form 4 操作 ──
+
+
+@_retry()
+def get_all_fs_tickers() -> list[str]:
+    """分页读取 us_fs_metadata 全部 ticker（US.XXX 格式）。"""
+    tickers: list[str] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _fd_client.table("us_fs_metadata")
+            .select("ticker")
+            .order("ticker")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        tickers.extend(row["ticker"] for row in rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return tickers
+
+
+@_retry()
+def upsert_form4_filings(rows: list[dict[str, Any]], batch_size: int = 100) -> int:
+    """批量 upsert us_sec_form4_filings（ON CONFLICT accession_no）。"""
+    if not rows:
+        return 0
+    inserted = 0
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        resp = (
+            _md_client.table("us_sec_form4_filings")
+            .upsert(batch, on_conflict="accession_no")
+            .execute()
+        )
+        inserted += len(resp.data or [])
+    return inserted
+
+
+@_retry()
+def upsert_form4_transactions(rows: list[dict[str, Any]], batch_size: int = 500) -> int:
+    """批量 upsert us_sec_form4_filing_transactions（ON CONFLICT accession_no+seq）。"""
+    if not rows:
+        return 0
+    inserted = 0
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        resp = (
+            _md_client.table("us_sec_form4_filing_transactions")
+            .upsert(batch, on_conflict="accession_no,seq")
+            .execute()
+        )
+        inserted += len(resp.data or [])
+    return inserted
+
+
+@_retry()
+def upsert_form4_definitions(rows: list[dict[str, Any]]) -> int:
+    """批量 upsert us_sec_form4_transaction_definitions。"""
+    if not rows:
+        return 0
+    resp = (
+        _md_client.table("us_sec_form4_transaction_definitions")
+        .upsert(rows, on_conflict="transaction_type,code,security_type")
+        .execute()
+    )
+    return len(resp.data or [])
+
+
+@_retry()
+def get_distinct_form4_defs() -> list[dict[str, Any]]:
+    """从 us_sec_form4_filing_transactions 查询去重的交易类型组合。"""
+    result: list[dict[str, Any]] = []
+    page_size = 1000
+    offset = 0
+    seen: set[tuple[str, str, str]] = set()
+    while True:
+        resp = (
+            _md_client.table("us_sec_form4_filing_transactions")
+            .select("transaction_type,code,security_type,code_description")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows: list[dict[str, Any]] = resp.data or []
+        for row in rows:
+            key = (
+                str(row["transaction_type"]),
+                str(row["code"]),
+                str(row["security_type"]),
+            )
+            if key not in seen:
+                seen.add(key)
+                result.append(row)
+        if len(rows) < page_size:
+            break
+        offset += page_size
     return result
