@@ -25,6 +25,10 @@ CREATE TABLE IF NOT EXISTS market_data.us_sec_form4_filings (
     is_10b5_1 boolean,
     no_securities boolean,
     remarks text,
+    primary_activity text,
+    net_change numeric,
+    net_value numeric,
+    remaining_shares numeric,
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 

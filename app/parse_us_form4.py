@@ -25,16 +25,16 @@ console = Console()
 # ── 提取逻辑 ──
 
 
-def extract_filing(filing, form, ticker: str) -> dict:
-    """提取 filing 级字段。"""
+def extract_filing(filing, summary, form, ticker: str) -> dict:
+    """提取 filing 级字段（含 summary 计算字段）。"""
     issuer = form.issuer
     return {
         "accession_no": filing.accession_no,
         "ticker": ticker,
         "cik": str(issuer.cik) if issuer else filing.cik,
         "company_name": str(issuer.name) if issuer else str(filing.company),
-        "insider_name": form.insider_name or "",
-        "position": form.position or "",
+        "insider_name": summary.insider_name or "",
+        "position": summary.position or "",
         "issuer": str(issuer.name) if issuer else "",
         "filing_date": str(filing.filing_date) if filing.filing_date else None,
         "reporting_period": str(form.reporting_period)
@@ -45,14 +45,17 @@ def extract_filing(filing, form, ticker: str) -> dict:
         "is_10b5_1": bool(form.aff10b5_one),
         "no_securities": bool(form.no_securities),
         "remarks": form.remarks or "",
+        "primary_activity": summary.primary_activity or "",
+        "net_change": summary.net_change,
+        "net_value": summary.net_value,
+        "remaining_shares": summary.remaining_shares,
     }
 
 
-def extract_transactions(form, accession_no: str) -> list[dict]:
+def extract_transactions(summary, accession_no: str) -> list[dict]:
     """提取所有 transaction 行。"""
-    activities = form.get_transaction_activities()
     rows: list[dict] = []
-    for seq, a in enumerate(activities):
+    for seq, a in enumerate(summary.transactions):
         rows.append(
             {
                 "accession_no": accession_no,
@@ -126,8 +129,9 @@ def parse_one_filing(task: FilingTask, data_dir: Path) -> ParseResult:
             accession_no=task.accession_no,
         )
         form = filing.obj()
-        filing_row = extract_filing(filing, form, task.ticker)
-        txn_rows = extract_transactions(form, task.accession_no)
+        summary = form.get_ownership_summary()  # type: ignore[union-attr]
+        filing_row = extract_filing(filing, summary, form, task.ticker)
+        txn_rows = extract_transactions(summary, task.accession_no)
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(
