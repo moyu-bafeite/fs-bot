@@ -1,0 +1,32 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    // Context7 — 实时获取库的最新文档
+    // 文档: https://context7.com/
+    // 需要设置 CONTEXT7_API_KEY 环境变量
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true,
+    },
+
+    // EdgarTools — SEC EDGAR 财务数据查询（公司财报、内部交易、XBRL 等）
+    // 文档: https://github.com/dgunning/edgartools
+    // 需要设置 EDGAR_IDENTITY 环境变量，格式: "姓名 邮箱"
+    "edgartools": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "--from",
+        "edgartools[ai]",
+        "--with",
+        "cryptography<43",
+        "edgartools-mcp",
+      ],
+      "env": {
+        "EDGAR_IDENTITY": "Finsco support@finsco.io",
+      },
+      "enabled": true,
+    },
+  },
+}
