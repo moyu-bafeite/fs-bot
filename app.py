@@ -143,9 +143,19 @@ def main() -> None:
             sys.argv = old_argv
 
     elif args.type == "build-form4-defs":
+        import sys
+
         from app.build_form4_defs import main as build_defs_main
 
-        build_defs_main()
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["build-form4-defs", "--help"]
+            else:
+                sys.argv = ["build-form4-defs"] + remaining
+            build_defs_main()
+        finally:
+            sys.argv = old_argv
 
 
 if __name__ == "__main__":
