@@ -22,6 +22,56 @@ from rich.table import Table
 console = Console()
 
 
+def _safe_float(val) -> float | None:
+    """安全转 float，跳过脚注引用（如 '[F1]'）和 numpy 类型。"""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if s.startswith("[") or not s:
+        return None
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_int(val) -> int | None:
+    """安全转 int，处理 numpy int64 等类型。"""
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _write_intermediate_log(
+    run_start: datetime,
+    done: int,
+    ok: int,
+    fail: int,
+    txn: int,
+    error_types: dict[str, int],
+) -> None:
+    log_dir = Path("logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = run_start.strftime("%Y%m%d_%H%M%S")
+    log_path = log_dir / f"parse_us_form4_{ts}_partial.json"
+    log_path.write_text(
+        json.dumps(
+            {
+                "run_at": run_start.isoformat(),
+                "progress": {"done": done, "ok": ok, "fail": fail, "txn": txn},
+                "error_distribution": dict(
+                    sorted(error_types.items(), key=lambda x: -x[1])[:10]
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
 # ── 提取逻辑 ──
 
 
@@ -46,31 +96,84 @@ def extract_filing(filing, summary, form, ticker: str) -> dict:
         "no_securities": bool(form.no_securities),
         "remarks": form.remarks or "",
         "primary_activity": summary.primary_activity or "",
-        "net_change": summary.net_change,
-        "net_value": summary.net_value,
-        "remaining_shares": summary.remaining_shares,
+        "net_change": _safe_int(summary.net_change),
+        "net_value": _safe_float(summary.net_value),
+        "remaining_shares": _safe_float(summary.remaining_shares),
     }
 
 
-def extract_transactions(summary, accession_no: str) -> list[dict]:
+def _extract_transaction_dates(form) -> dict[tuple[str, int], str]:
+    """按 DataFrame 索引提取交易日期，返回 {(security_type, df_index): date}。"""
+    dates: dict[tuple[str, int], str] = {}
+    try:
+        ndt = form.non_derivative_table
+        if ndt and ndt.has_transactions:
+            mt = ndt.market_trades
+            if mt is not None and not mt.empty:
+                for idx, row in mt.iterrows():
+                    dates[("non-derivative", idx)] = str(row.get("Date", "")) if row.get("Date") else ""
+            nmt = ndt.non_market_trades
+            if nmt is not None and not nmt.empty:
+                for idx, row in nmt.iterrows():
+                    dates[("non-derivative", idx)] = str(row.get("Date", "")) if row.get("Date") else ""
+    except Exception:
+        pass
+    try:
+        dt = form.derivative_table
+        if dt and dt.has_transactions:
+            df = dt.transactions.data
+            if not df.empty:
+                for idx, row in df.iterrows():
+                    dates[("derivative", idx)] = str(row.get("Date", "")) if row.get("Date") else ""
+    except Exception:
+        pass
+    return dates
+
+
+def extract_transactions(summary, form, accession_no: str) -> list[dict]:
     """提取所有 transaction 行。"""
+    date_map = _extract_transaction_dates(form)
+    # 按 get_transaction_activities() 的顺序构建索引列表
+    date_keys: list[tuple[str, int]] = []
+    try:
+        ndt = form.non_derivative_table
+        if ndt and ndt.has_transactions:
+            mt = ndt.market_trades
+            if mt is not None and not mt.empty:
+                date_keys.extend(("non-derivative", idx) for idx in mt.index)
+            nmt = ndt.non_market_trades
+            if nmt is not None and not nmt.empty:
+                date_keys.extend(("non-derivative", idx) for idx in nmt.index)
+    except Exception:
+        pass
+    try:
+        dt = form.derivative_table
+        if dt and dt.has_transactions:
+            df = dt.transactions.data
+            if not df.empty:
+                date_keys.extend(("derivative", idx) for idx in df.index)
+    except Exception:
+        pass
+
     rows: list[dict] = []
     for seq, a in enumerate(summary.transactions):
+        txn_date = ""
+        if seq < len(date_keys):
+            txn_date = date_map.get(date_keys[seq], "")
         rows.append(
             {
                 "accession_no": accession_no,
                 "seq": seq,
+                "transaction_date": txn_date or None,
                 "transaction_type": a.transaction_type or "",
                 "code": a.code or "",
                 "code_description": a.code_description or "",
                 "security_type": a.security_type or "",
                 "security_title": a.security_title or "",
                 "underlying_security": a.underlying_security or "",
-                "shares": float(a.shares) if a.shares else None,
-                "price_per_share": float(a.price_per_share)
-                if a.price_per_share
-                else None,
-                "value": float(a.value) if a.value else None,
+                "shares": _safe_float(a.shares),
+                "price_per_share": _safe_float(a.price_per_share),
+                "value": _safe_float(a.value),
                 "exercise_date": str(a.exercise_date)
                 if a.exercise_date and not str(a.exercise_date).startswith("[")
                 else None,
@@ -129,9 +232,12 @@ def parse_one_filing(task: FilingTask, data_dir: Path) -> ParseResult:
             accession_no=task.accession_no,
         )
         form = filing.obj()
+        if form is None:
+            result.error_msg = "obj() returned None (XML unavailable)"
+            return result
         summary = form.get_ownership_summary()  # type: ignore[union-attr]
         filing_row = extract_filing(filing, summary, form, task.ticker)
-        txn_rows = extract_transactions(summary, task.accession_no)
+        txn_rows = extract_transactions(summary, form, task.accession_no)
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(
@@ -240,6 +346,7 @@ def run(args: argparse.Namespace) -> None:
     fail_count = 0
     total_txn = 0
     errors: list[dict] = []
+    error_types: dict[str, int] = {}
     first_new_printed = False
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -274,12 +381,18 @@ def run(args: argparse.Namespace) -> None:
                         "error": result.error_msg,
                     }
                 )
+                err_key = result.error_msg[:80]
+                error_types[err_key] = error_types.get(err_key, 0) + 1
 
             done = success_count + fail_count
             if done % 5 == 0 or done == total_pending:
                 console.print(
                     f"  进度: {done}/{total_pending} "
                     f"(ok={success_count} fail={fail_count} txn={total_txn:,})"
+                )
+            if done % 100 == 0:
+                _write_intermediate_log(
+                    run_start, done, success_count, fail_count, total_txn, error_types
                 )
 
     elapsed = time.time() - start_time
@@ -295,6 +408,17 @@ def run(args: argparse.Namespace) -> None:
     summary.add_row("耗时", f"{elapsed / 60:.1f} 分钟")
     console.print()
     console.print(summary)
+
+    if error_types and not args.quiet:
+        dist_table = Table(
+            title="错误分布 (Top 10)", show_header=True, header_style="bold yellow", box=None
+        )
+        dist_table.add_column("错误类型", max_width=60)
+        dist_table.add_column("数量", justify="right")
+        for err_key, count in sorted(error_types.items(), key=lambda x: -x[1])[:10]:
+            dist_table.add_row(err_key, f"{count:,}")
+        console.print()
+        console.print(dist_table)
 
     if errors and not args.quiet:
         err_table = Table(
@@ -325,6 +449,9 @@ def run(args: argparse.Namespace) -> None:
                     "failed": fail_count,
                     "transactions": total_txn,
                 },
+                "error_distribution": dict(
+                    sorted(error_types.items(), key=lambda x: -x[1])[:20]
+                ),
                 "errors": errors[:50],
             },
             ensure_ascii=False,
@@ -345,7 +472,7 @@ def parse_args() -> argparse.Namespace:
         help="逗号分隔的 ticker 列表（US.XXX 格式，默认解析全部索引）",
     )
     p.add_argument(
-        "--workers", type=int, default=8, help="并发线程数 (默认 8, 最大 20)"
+        "--workers", type=int, default=4, help="并发线程数 (默认 4, 最大 20)"
     )
     p.add_argument(
         "--data-dir", type=str, default="data/form4", help="数据目录 (默认 data/form4/)"

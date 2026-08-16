@@ -22,7 +22,7 @@ from lib.db import get_all_fs_tickers
 
 console = Console()
 
-START_DATE = "2005-01-01"
+START_DATE = "2015-01-01"
 
 
 @dataclass

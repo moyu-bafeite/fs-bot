@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS market_data.us_sec_form4_filing_transactions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     accession_no text NOT NULL,
     seq int NOT NULL,
+    transaction_date date,
     transaction_type text NOT NULL,
     code text NOT NULL,
     code_description text,
