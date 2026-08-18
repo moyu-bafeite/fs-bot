@@ -371,6 +371,23 @@ def upsert_form4_definitions(rows: list[dict[str, Any]]) -> int:
 
 
 @_retry()
+def upsert_cik_mappings(records: list[dict[str, Any]], batch_size: int = 1000) -> int:
+    """批量 upsert us_sec_ticker_cik_mappings（ON CONFLICT ticker,cik）。"""
+    if not records:
+        return 0
+    inserted = 0
+    for i in range(0, len(records), batch_size):
+        batch = records[i : i + batch_size]
+        resp = (
+            _meta_client.table("us_sec_ticker_cik_mappings")
+            .upsert(batch, on_conflict="ticker,cik")
+            .execute()
+        )
+        inserted += len(resp.data or [])
+    return inserted
+
+
+@_retry()
 def get_distinct_form4_defs() -> list[dict[str, Any]]:
     """从 us_sec_form4_filing_transactions 查询去重的交易类型组合。"""
     result: list[dict[str, Any]] = []

@@ -28,6 +28,20 @@
         "EDGAR_IDENTITY": "Finsco support@finsco.io"
       },
       "enabled": true
-    }
+    },
+
+    "playwright": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@playwright/mcp@latest",
+          "--extension"
+        ],
+        "enabled": true,
+        "environment": {
+          "PLAYWRIGHT_MCP_EXTENSION_TOKEN": "e7a16k32-S68TrQxmVvRKinKqBTyjfZhLoEiN9OMi2o"
+        }
+      }
   }
 }

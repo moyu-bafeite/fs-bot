@@ -24,3 +24,5 @@ data/
 .mimocode/package-lock.json
 .mimocode/.gitignore
 .vercel
+
+.playwright-mcp

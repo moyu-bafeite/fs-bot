@@ -17,6 +17,7 @@ def main() -> None:
         choices=[
             "sync-hk-stocks",
             "sync-us-stocks",
+            "sync-us-sec-cik-mappings",
             "fetch-us-fs",
             "push-us-fs",
             "show-fs",
@@ -61,6 +62,12 @@ def main() -> None:
         opts = sub.parse_args(remaining)
         count = sync(full=opts.full, workers=opts.workers, interval=opts.interval)
         print(f"完成，共写入 {count} 条美股记录")
+
+    elif args.type == "sync-us-sec-cik-mappings":
+        from app.sync_us_sec_cik_mappings import sync
+
+        count = sync()
+        print(f"完成，共写入 {count} 条 CIK 映射记录")
 
     elif args.type == "fetch-us-fs":
         import sys
