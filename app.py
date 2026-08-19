@@ -25,6 +25,8 @@ def main() -> None:
             "parse-us-form4",
             "push-us-form4",
             "build-form4-defs",
+            "fetch-hk-repurchase-actions",
+            "push-hk-repurchase-actions",
         ],
         help="任务类型",
     )
@@ -161,6 +163,36 @@ def main() -> None:
             else:
                 sys.argv = ["build-form4-defs"] + remaining
             build_defs_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "fetch-hk-repurchase-actions":
+        import sys
+
+        from app.fetch_hk_repurchase_actions import main as fetch_repurchase_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["fetch-hk-repurchase-actions", "--help"]
+            else:
+                sys.argv = ["fetch-hk-repurchase-actions"] + remaining
+            fetch_repurchase_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "push-hk-repurchase-actions":
+        import sys
+
+        from app.push_hk_repurchase_actions import main as push_repurchase_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["push-hk-repurchase-actions", "--help"]
+            else:
+                sys.argv = ["push-hk-repurchase-actions"] + remaining
+            push_repurchase_main()
         finally:
             sys.argv = old_argv
 
