@@ -93,7 +93,7 @@ def upsert_hk_repurchase_actions(records: list[dict[str, Any]]) -> int:
         return 0
     resp = (
         _md_client.table("hk_repurchase_actions")
-        .upsert(records, on_conflict="stock_code,publish_date,amount")
+        .upsert(records, on_conflict="stock_code,publish_date,end_date,amount")
         .execute()
     )
     return len(resp.data or [])
