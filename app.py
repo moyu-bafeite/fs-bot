@@ -16,6 +16,7 @@ def main() -> None:
             "sync-hk-stocks",
             "fetch-hk-repurchase-actions",
             "push-hk-repurchase-actions",
+            "generate-daily-ranking",
         ],
         help="任务类型",
     )
@@ -70,6 +71,21 @@ def main() -> None:
             else:
                 sys.argv = ["push-hk-repurchase-actions"] + remaining
             push_repurchase_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "generate-daily-ranking":
+        import sys
+
+        from app.generate_daily_ranking import main as generate_ranking_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["generate-daily-ranking", "--help"]
+            else:
+                sys.argv = ["generate-daily-ranking"] + remaining
+            generate_ranking_main()
         finally:
             sys.argv = old_argv
 

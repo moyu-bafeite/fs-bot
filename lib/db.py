@@ -97,3 +97,42 @@ def upsert_hk_repurchase_actions(records: list[dict[str, Any]]) -> int:
         .execute()
     )
     return len(resp.data or [])
+
+
+def get_repurchase_actions_by_publish_date(
+    publish_date: str,
+) -> list[dict[str, Any]]:
+    """查询指定交易日的所有回购记录。"""
+    resp = (
+        _md_client.table("hk_repurchase_actions")
+        .select("*")
+        .eq("publish_date", publish_date)
+        .execute()
+    )
+    return resp.data or []
+
+
+def get_repurchase_actions_by_transaction_date(
+    end_date: str,
+) -> list[dict[str, Any]]:
+    """查询指定交易日的所有回购记录。"""
+    resp = (
+        _md_client.table("hk_repurchase_actions")
+        .select("*")
+        .eq("end_date", end_date)
+        .execute()
+    )
+    return resp.data or []
+
+
+def get_stock_names(stock_codes: list[str]) -> dict[str, str]:
+    """批量查询股票名称，返回 {stock_code: stock_name} 映射。"""
+    if not stock_codes:
+        return {}
+    resp = (
+        _table(HK_STOCKS_TABLE)
+        .select("stock_code,stock_name")
+        .in_("stock_code", stock_codes)
+        .execute()
+    )
+    return {row["stock_code"]: row["stock_name"] for row in (resp.data or [])}
