@@ -3,16 +3,17 @@
 
 Pipeline:
   1. 扫描文件 → 与 manifest 对比 → 找出变更文件
-  2. 读取变更文件 → 合并记录
-  3. 批量 upsert 到 market_data.hk_repurchase_actions
-  4. 保存 manifest
+  2. 多线程读取变更文件 → 写入数据库
+  3. 保存 manifest
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,6 +31,7 @@ MANIFEST_NAME = "_manifest.json"
 class Manifest:
     path: Path
     files: dict[str, dict] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @classmethod
     def load(cls, data_dir: Path) -> Manifest:
@@ -65,7 +67,8 @@ class Manifest:
     def mark(self, file_path: Path) -> None:
         rel = file_path.name
         stat = file_path.stat()
-        self.files[rel] = {"mtime": stat.st_mtime, "size": stat.st_size}
+        with self._lock:
+            self.files[rel] = {"mtime": stat.st_mtime, "size": stat.st_size}
 
 
 @dataclass
@@ -90,37 +93,49 @@ def scan_files(data_dir: Path, stock_codes: set[str] | None = None) -> list[Path
     return files
 
 
+def _process_one_file(file_path: Path) -> PushResult:
+    """处理单个文件：读取并写入数据库。"""
+    stock_code = file_path.stem
+    try:
+        records = json.loads(file_path.read_text())
+        if not isinstance(records, list):
+            raise ValueError(f"文件格式错误: 期望数组，得到 {type(records)}")
+        if records:
+            upsert_hk_repurchase_actions(records)
+        return PushResult(stock_code=stock_code, record_count=len(records))
+    except Exception as e:
+        return PushResult(stock_code=stock_code, error_msg=str(e))
+
+
 def push_files(
     files: list[Path],
     quiet: bool,
+    workers: int = 4,
 ) -> tuple[int, list[PushResult]]:
-    """读取文件并批量写入数据库。"""
-    all_records: list[dict] = []
+    """多线程读取文件并写入数据库。"""
     results: list[PushResult] = []
+    total_records = 0
+    completed = 0
+    lock = threading.Lock()
 
-    for file_path in files:
-        stock_code = file_path.stem
-        try:
-            records = json.loads(file_path.read_text())
-            if not isinstance(records, list):
-                raise ValueError(f"文件格式错误: 期望数组，得到 {type(records)}")
-            all_records.extend(records)
-            results.append(PushResult(stock_code=stock_code, record_count=len(records)))
-        except Exception as e:
-            results.append(PushResult(stock_code=stock_code, error_msg=str(e)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_process_one_file, f): f for f in files}
 
-    # 批量写入
-    if all_records:
-        try:
-            inserted = upsert_hk_repurchase_actions(all_records)
-            if not quiet:
-                console.print(f"  写入 {inserted} 条记录到数据库")
-        except Exception as e:
-            for r in results:
-                if not r.error_msg:
-                    r.error_msg = f"数据库写入失败: {e}"
+        for future in as_completed(futures):
+            result = future.result()
+            with lock:
+                results.append(result)
+                if not result.error_msg:
+                    total_records += result.record_count
+                completed += 1
+                if not quiet:
+                    status = "OK" if not result.error_msg else "FAIL"
+                    console.print(
+                        f"  [{completed:>4d}/{len(files)}] {result.stock_code} - "
+                        f"{result.record_count} records [{status}]"
+                    )
 
-    return len(all_records), results
+    return total_records, results
 
 
 def run(args: argparse.Namespace) -> None:
@@ -149,7 +164,7 @@ def run(args: argparse.Namespace) -> None:
 
     # Phase 2: Push
     start_time = time.time()
-    total_records, results = push_files(changed, args.quiet)
+    total_records, results = push_files(changed, args.quiet, args.workers)
     elapsed = time.time() - start_time
 
     # Phase 3: Mark & Save manifest
@@ -236,6 +251,9 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--data-dir", type=str, default="data/repurchase_actions", help="数据目录"
+    )
+    p.add_argument(
+        "--workers", type=int, default=4, help="并发线程数 (默认 4)"
     )
     p.add_argument("--quiet", action="store_true", help="cron 模式")
     args = p.parse_args()
