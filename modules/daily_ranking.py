@@ -166,10 +166,7 @@ class Renderer:
             )
 
         self._console.print(table)
-        self._console.print(
-            f"\n  共 {len(items)} 只股票参与回购，"
-            f"总金额 {sum(i.total_amount for i in items):,.2f}"
-        )
+        self._console.print(f"共 {len(items)} 家公司进行回购")
 
 
 # ── 数据导出 ──
