@@ -14,6 +14,11 @@ _EXCLUDE_KEYWORDS = re.compile(
     r"ETF|REIT|FUND|TRUST|BOND|NOTE|TBILL|GILT", re.IGNORECASE
 )
 
+# 排除衍生品：PRC债券、认股权证(W+数字)、票据(N+数字)、债券(B+数字)
+_DERIVATIVE_PATTERN = re.compile(
+    r"PRC B\d|W\d{2,4}$|\sN\d{3,4}|\sB\d{3,4}|HSDIV", re.IGNORECASE
+)
+
 
 def _is_main_board_equity(code: str, name: str) -> bool:
     """判断是否为主板正股：5位代码以0开头，排除债券/结构化产品/ETF等。"""
@@ -21,7 +26,9 @@ def _is_main_board_equity(code: str, name: str) -> bool:
         return False
     if code[:2] in ("04", "05", "07"):
         return False
-    return not _EXCLUDE_KEYWORDS.search(name)
+    if _EXCLUDE_KEYWORDS.search(name) or _DERIVATIVE_PATTERN.search(name):
+        return False
+    return True
 
 
 def sync() -> int:
