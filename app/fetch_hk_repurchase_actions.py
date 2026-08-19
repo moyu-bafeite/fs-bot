@@ -10,7 +10,7 @@ import argparse
 import json
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -50,7 +50,9 @@ def get_stock_list(args: argparse.Namespace) -> list[dict]:
             if stock:
                 stocks.append(stock)
             else:
-                console.print(f"  [yellow]stock_code 不在 sehk_active_stocks 表中: {code}[/yellow]")
+                console.print(
+                    f"  [yellow]stock_code 不在 sehk_active_stocks 表中: {code}[/yellow]"
+                )
         return stocks
     return get_hk_stocks()
 
@@ -84,7 +86,9 @@ def fetch_one_stock(
                 raise RuntimeError(str(data))
 
             if not isinstance(data, dict):
-                raise RuntimeError(f"API 返回异常: type={type(data)}, value={str(data)[:200]}")
+                raise RuntimeError(
+                    f"API 返回异常: type={type(data)}, value={str(data)[:200]}"
+                )
 
             # hk_buy_back_list 是 DataFrame，需要转换为 list[dict]
             buy_back_df = data.get("hk_buy_back_list")
@@ -94,19 +98,23 @@ def fetch_one_stock(
                 buy_back_list = buy_back_df or []
 
             for item in buy_back_list:
-                records.append({
-                    "stock_code": stock_code,
-                    "publish_date": _clean_nan(item.get("publ_date_str")),
-                    "end_date": _clean_nan(item.get("end_date_str")),
-                    "amount": _clean_nan(item.get("buy_back_money")),
-                    "quantity": _clean_nan(item.get("buy_back_sum")),
-                    "percentage": _clean_nan(item.get("percentage")),
-                    "high_price": _clean_nan(item.get("high_price")),
-                    "low_price": _clean_nan(item.get("low_price")),
-                    "cumulative_quantity": _clean_nan(item.get("cumulative_sum")),
-                    "cumulative_percentage": _clean_nan(item.get("cumulative_percentage")),
-                    "share_type": _clean_nan(item.get("share_type")) or "普通股",
-                })
+                records.append(
+                    {
+                        "stock_code": stock_code,
+                        "publish_date": _clean_nan(item.get("publ_date_str")),
+                        "end_date": _clean_nan(item.get("end_date_str")),
+                        "amount": _clean_nan(item.get("buy_back_money")),
+                        "quantity": _clean_nan(item.get("buy_back_sum")),
+                        "percentage": _clean_nan(item.get("percentage")),
+                        "high_price": _clean_nan(item.get("high_price")),
+                        "low_price": _clean_nan(item.get("low_price")),
+                        "cumulative_quantity": _clean_nan(item.get("cumulative_sum")),
+                        "cumulative_percentage": _clean_nan(
+                            item.get("cumulative_percentage")
+                        ),
+                        "share_type": _clean_nan(item.get("share_type")) or "普通股",
+                    }
+                )
 
             next_key = data.get("next_key")
             if not next_key or next_key == "-1":
@@ -166,9 +174,7 @@ def run(args: argparse.Namespace) -> None:
     fail_results: list[FetchResult] = []
 
     for i, stock in enumerate(stocks, 1):
-        result = fetch_one_stock(
-            ctx, limiter, i, total, args.quiet, stock, data_dir
-        )
+        result = fetch_one_stock(ctx, limiter, i, total, args.quiet, stock, data_dir)
         if result.ok:
             success_results.append(result)
         else:
@@ -237,9 +243,16 @@ def run(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="从 Futu API 抓取港股回购数据")
-    p.add_argument("--stock-codes", type=str, default=None, help="逗号分隔的 stock_code 列表")
+    p.add_argument(
+        "--stock-codes", type=str, default=None, help="逗号分隔的 stock_code 列表"
+    )
     p.add_argument("--max-stocks", type=int, default=0, help="最多处理 N 只 (0=不限)")
-    p.add_argument("--data-dir", type=str, default="data/repurchase_actions", help="数据目录 (默认 data/repurchase_actions/)")
+    p.add_argument(
+        "--data-dir",
+        type=str,
+        default="data/repurchase_actions",
+        help="数据目录 (默认 data/repurchase_actions/)",
+    )
     p.add_argument("--quiet", action="store_true", help="cron 模式")
     args = p.parse_args()
     if args.stock_codes and args.max_stocks:

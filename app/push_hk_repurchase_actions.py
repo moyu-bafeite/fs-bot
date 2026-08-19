@@ -127,7 +127,9 @@ def run(args: argparse.Namespace) -> None:
     data_dir = Path(args.data_dir)
     stock_codes_filter = None
     if args.stock_codes:
-        stock_codes_filter = {c.strip() for c in args.stock_codes.split(",") if c.strip()}
+        stock_codes_filter = {
+            c.strip() for c in args.stock_codes.split(",") if c.strip()
+        }
 
     # Phase 1: Scan & Diff
     all_files = scan_files(data_dir, stock_codes_filter)
@@ -162,7 +164,9 @@ def run(args: argparse.Namespace) -> None:
 
     # Summary
     if not args.quiet:
-        summary = Table(title="推送完成", show_header=True, header_style="bold", box=None)
+        summary = Table(
+            title="推送完成", show_header=True, header_style="bold", box=None
+        )
         summary.add_column("项目", style="bold")
         summary.add_column("值")
         summary.add_row("变更文件", f"{len(changed):,}")
@@ -221,9 +225,18 @@ def run(args: argparse.Namespace) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="从 data/repurchase_actions/ 推送回购数据到 Supabase")
-    p.add_argument("--stock-codes", type=str, default=None, help="逗号分隔的 stock_code 列表 (默认扫描全部)")
-    p.add_argument("--data-dir", type=str, default="data/repurchase_actions", help="数据目录")
+    p = argparse.ArgumentParser(
+        description="从 data/repurchase_actions/ 推送回购数据到 Supabase"
+    )
+    p.add_argument(
+        "--stock-codes",
+        type=str,
+        default=None,
+        help="逗号分隔的 stock_code 列表 (默认扫描全部)",
+    )
+    p.add_argument(
+        "--data-dir", type=str, default="data/repurchase_actions", help="数据目录"
+    )
     p.add_argument("--quiet", action="store_true", help="cron 模式")
     args = p.parse_args()
     return args
