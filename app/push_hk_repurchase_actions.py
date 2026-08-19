@@ -252,9 +252,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--data-dir", type=str, default="data/repurchase_actions", help="数据目录"
     )
-    p.add_argument(
-        "--workers", type=int, default=4, help="并发线程数 (默认 4)"
-    )
+    p.add_argument("--workers", type=int, default=4, help="并发线程数 (默认 4)")
     p.add_argument("--quiet", action="store_true", help="cron 模式")
     args = p.parse_args()
     return args

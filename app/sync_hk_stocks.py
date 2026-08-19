@@ -45,7 +45,7 @@ def sync() -> int:
         records.append(
             {
                 "stock_code": code,
-                "stock_name": name,
+                "stock_name": {"en": name, "zh-CN": "", "zh-HK": ""},
                 "hkex_id": item["i"],
             }
         )

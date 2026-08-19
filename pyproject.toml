@@ -11,6 +11,7 @@ dependencies = [
     "rich>=13.0",
     "futu-api>=10.7",
     "pyrate-limiter>=4.4.0",
+    "opencc-python-reimplemented>=0.1.7",
 ]
 
 [project.optional-dependencies]

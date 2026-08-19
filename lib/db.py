@@ -125,8 +125,8 @@ def get_repurchase_actions_by_transaction_date(
     return resp.data or []
 
 
-def get_stock_names(stock_codes: list[str]) -> dict[str, str]:
-    """批量查询股票名称，返回 {stock_code: stock_name} 映射。"""
+def get_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
+    """批量查询股票名称，返回 {stock_code: {"en": "", "zh-CN": "", "zh-HK": ""}} 映射。"""
     if not stock_codes:
         return {}
     resp = (

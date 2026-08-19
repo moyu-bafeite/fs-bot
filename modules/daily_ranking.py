@@ -24,7 +24,7 @@ class RankingItem:
 
     rank: int
     stock_code: str
-    stock_name: str
+    stock_name: dict[str, str]
     total_amount: float
     total_quantity: int
     high_price: float
@@ -46,7 +46,7 @@ class DataFetcher:
         return get_repurchase_actions_by_transaction_date(end_date.isoformat())
 
     @staticmethod
-    def fetch_stock_names(stock_codes: list[str]) -> dict[str, str]:
+    def fetch_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
         """批量获取股票名称映射。"""
         return get_stock_names(stock_codes)
 
@@ -59,7 +59,7 @@ class DataAggregator:
 
     @staticmethod
     def aggregate(
-        records: list[dict[str, Any]], stock_names: dict[str, str]
+        records: list[dict[str, Any]], stock_names: dict[str, dict[str, str]]
     ) -> list[RankingItem]:
         """按股票代码聚合回购数据，按总金额降序排序。"""
         grouped: dict[str, list[dict[str, Any]]] = {}
@@ -87,7 +87,9 @@ class DataAggregator:
                 RankingItem(
                     rank=0,
                     stock_code=code,
-                    stock_name=stock_names.get(code, ""),
+                    stock_name=stock_names.get(
+                        code, {"en": "", "zh-CN": "", "zh-HK": ""}
+                    ),
                     total_amount=total_amount,
                     total_quantity=total_quantity,
                     high_price=high_price,
@@ -146,14 +148,14 @@ class Renderer:
         # table.add_column("最高价", justify="right", min_width=8)
         # table.add_column("最低价", justify="right", min_width=8)
         # table.add_column("笔数", justify="right", min_width=4)
-        table.add_column("本轮累计数量", justify="right", min_width=10)
+        table.add_column("本轮累计购回", justify="right", min_width=10)
         table.add_column("本轮累计占比", justify="right", min_width=8)
 
         for item in display_items:
             table.add_row(
                 str(item.rank),
                 item.stock_code,
-                item.stock_name,
+                item.stock_name.get("zh-CN", ""),
                 f"{item.total_amount:,.2f}",
                 f"{item.total_quantity:,}",
                 # f"{item.high_price:.3f}",
