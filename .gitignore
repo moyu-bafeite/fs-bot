@@ -29,3 +29,5 @@ output/
 
 .playwright-mcp/
 .ruff_cache/
+
+test.py

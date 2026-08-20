@@ -17,8 +17,8 @@ def main() -> None:
             "fetch-hk-repurchase-actions",
             "push-hk-repurchase-actions",
             "generate-daily-ranking",
-            "fetch-stocks-of-multiple-exchanges",
             "download-hkex-srrpt",
+            "parse-hkex-srrpt",
         ],
         help="任务类型",
     )
@@ -91,21 +91,6 @@ def main() -> None:
         finally:
             sys.argv = old_argv
 
-    elif args.type == "fetch-stocks-of-multiple-exchanges":
-        import sys
-
-        from app.fetch_stocks_of_multiple_exchanges import main as fetch_stocks_main
-
-        old_argv = sys.argv
-        try:
-            if args.help:
-                sys.argv = ["fetch-stocks-of-multiple-exchanges", "--help"]
-            else:
-                sys.argv = ["fetch-stocks-of-multiple-exchanges"] + remaining
-            fetch_stocks_main()
-        finally:
-            sys.argv = old_argv
-
     elif args.type == "download-hkex-srrpt":
         import sys
 
@@ -118,6 +103,21 @@ def main() -> None:
             else:
                 sys.argv = ["download-hkex-srrpt"] + remaining
             download_srrpt_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "parse-hkex-srrpt":
+        import sys
+
+        from app.parse_hkex_srrpt import main as parse_srrpt_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["parse-hkex-srrpt", "--help"]
+            else:
+                sys.argv = ["parse-hkex-srrpt"] + remaining
+            parse_srrpt_main()
         finally:
             sys.argv = old_argv
 
