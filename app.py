@@ -19,6 +19,7 @@ def main() -> None:
             "generate-daily-ranking",
             "download-hkex-srrpt",
             "parse-hkex-srrpt",
+            "upload-hkex-srrpt",
         ],
         help="任务类型",
     )
@@ -118,6 +119,21 @@ def main() -> None:
             else:
                 sys.argv = ["parse-hkex-srrpt"] + remaining
             parse_srrpt_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "upload-hkex-srrpt":
+        import sys
+
+        from app.upload_hkex_srrpt import main as upload_srrpt_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["upload-hkex-srrpt", "--help"]
+            else:
+                sys.argv = ["upload-hkex-srrpt"] + remaining
+            upload_srrpt_main()
         finally:
             sys.argv = old_argv
 
