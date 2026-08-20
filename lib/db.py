@@ -135,3 +135,26 @@ def get_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
         .execute()
     )
     return {row["stock_code"]: row["stock_name"] for row in (resp.data or [])}
+
+
+def get_hkex_repurchase_reports(trade_date: str) -> list[dict[str, Any]]:
+    """分页查询指定交易日的港交所回购报告。"""
+    records: list[dict[str, Any]] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _md_client.table("hk_hkex_repurchase_reports")
+            .select("*")
+            .eq("trade_date", trade_date)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            break
+        records.extend(rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return records

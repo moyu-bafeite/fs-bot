@@ -29,7 +29,7 @@ FIELD_MAP = {
     "method": "method",
     "for_cancellation": "for_cancellation",
     "for_treasury": "for_treasury",
-    "total_repurchased": "cumulative_quantity",
+    "under_mandate": "cumulative_quantity",
     "pct_of_issued": "cumulative_pct",
 }
 

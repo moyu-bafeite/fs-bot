@@ -12,7 +12,7 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-from lib.db import get_repurchase_actions_by_transaction_date, get_stock_names
+from lib.db import get_hkex_repurchase_reports, get_stock_names
 
 
 # ── 数据模型 ──
@@ -25,13 +25,16 @@ class RankingItem:
     rank: int
     stock_code: str
     stock_name: dict[str, str]
+    currency: str
     total_amount: float
     total_quantity: int
     high_price: float
     low_price: float
     action_count: int
     cumulative_quantity: int
-    cumulative_percentage: float
+    cumulative_pct: float
+    for_cancellation: int
+    for_treasury: int
 
 
 # ── 数据获取 ──
@@ -41,9 +44,9 @@ class DataFetcher:
     """封装数据库查询逻辑。"""
 
     @staticmethod
-    def fetch(end_date: date) -> list[dict[str, Any]]:
-        """获取指定日期的回购原始数据。"""
-        return get_repurchase_actions_by_transaction_date(end_date.isoformat())
+    def fetch(trade_date: date) -> list[dict[str, Any]]:
+        """获取指定交易日的回购报告数据。"""
+        return get_hkex_repurchase_reports(trade_date.isoformat())
 
     @staticmethod
     def fetch_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
@@ -61,14 +64,15 @@ class DataAggregator:
     def aggregate(
         records: list[dict[str, Any]], stock_names: dict[str, dict[str, str]]
     ) -> list[RankingItem]:
-        """按股票代码聚合回购数据，按总金额降序排序。"""
-        grouped: dict[str, list[dict[str, Any]]] = {}
+        """按股票代码+币种聚合回购数据，按总金额降序排序。"""
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for record in records:
             code = record["stock_code"]
-            grouped.setdefault(code, []).append(record)
+            currency = record.get("currency", "")
+            grouped.setdefault((code, currency), []).append(record)
 
         items: list[RankingItem] = []
-        for code, actions in grouped.items():
+        for (code, currency), actions in grouped.items():
             total_amount = sum(a["amount"] or 0 for a in actions)
             total_quantity = sum(int(a["quantity"] or 0) for a in actions)
             high_price = max((a["high_price"] or 0) for a in actions)
@@ -79,9 +83,9 @@ class DataAggregator:
             cumulative_quantity = max(
                 (int(a["cumulative_quantity"] or 0) for a in actions), default=0
             )
-            cumulative_percentage = max(
-                (a["cumulative_percentage"] or 0 for a in actions), default=0
-            )
+            cumulative_pct = max((a["cumulative_pct"] or 0 for a in actions), default=0)
+            for_cancellation = sum(int(a["for_cancellation"] or 0) for a in actions)
+            for_treasury = sum(int(a["for_treasury"] or 0) for a in actions)
 
             items.append(
                 RankingItem(
@@ -90,13 +94,16 @@ class DataAggregator:
                     stock_name=stock_names.get(
                         code, {"en": "", "zh-CN": "", "zh-HK": ""}
                     ),
+                    currency=currency,
                     total_amount=total_amount,
                     total_quantity=total_quantity,
                     high_price=high_price,
                     low_price=low_price,
                     action_count=len(actions),
                     cumulative_quantity=cumulative_quantity,
-                    cumulative_percentage=cumulative_percentage,
+                    cumulative_pct=cumulative_pct,
+                    for_cancellation=for_cancellation,
+                    for_treasury=for_treasury,
                 )
             )
 
@@ -106,13 +113,16 @@ class DataAggregator:
                 rank=i + 1,
                 stock_code=item.stock_code,
                 stock_name=item.stock_name,
+                currency=item.currency,
                 total_amount=item.total_amount,
                 total_quantity=item.total_quantity,
                 high_price=item.high_price,
                 low_price=item.low_price,
                 action_count=item.action_count,
                 cumulative_quantity=item.cumulative_quantity,
-                cumulative_percentage=item.cumulative_percentage,
+                cumulative_pct=item.cumulative_pct,
+                for_cancellation=item.for_cancellation,
+                for_treasury=item.for_treasury,
             )
             for i, item in enumerate(items)
         ]
@@ -128,45 +138,66 @@ class Renderer:
         self._console = console or Console()
 
     def render(
-        self, transaction_date: date, items: list[RankingItem], top_n: int = 0
+        self, trade_date: date, items: list[RankingItem], top_n: int = 0
     ) -> None:
-        """打印回购排行榜。"""
+        """打印回购排行榜，按币种分组。"""
         display_items = items[:top_n] if top_n > 0 else items
 
-        table = Table(
-            title=f"港股回购榜 {transaction_date.isoformat()}",
-            show_header=True,
-            header_style="bold cyan",
-            border_style="dim",
-            expand=True,
-        )
-        table.add_column("#", justify="right", style="bold", min_width=3)
-        table.add_column("代码", min_width=6)
-        table.add_column("名称", min_width=10)
-        table.add_column("回购金额", justify="right", min_width=14)
-        table.add_column("回购数量", justify="right", min_width=10)
-        # table.add_column("最高价", justify="right", min_width=8)
-        # table.add_column("最低价", justify="right", min_width=8)
-        # table.add_column("笔数", justify="right", min_width=4)
-        table.add_column("本轮累计购回", justify="right", min_width=10)
-        table.add_column("本轮累计占比", justify="right", min_width=8)
+        # 按币种分组
+        currencies = list(dict.fromkeys(item.currency for item in display_items))
 
-        for item in display_items:
-            table.add_row(
-                str(item.rank),
-                item.stock_code,
-                item.stock_name.get("zh-CN", ""),
-                f"{item.total_amount:,.2f}",
-                f"{item.total_quantity:,}",
-                # f"{item.high_price:.3f}",
-                # f"{item.low_price:.3f}",
-                # str(item.action_count),
-                f"{item.cumulative_quantity:,}",
-                f"{item.cumulative_percentage:.4f}%",
+        for currency in currencies:
+            group = [item for item in display_items if item.currency == currency]
+            if not group:
+                continue
+
+            table = Table(
+                title=f"港股回购榜 {trade_date.isoformat()} ({currency})",
+                show_header=True,
+                header_style="bold cyan",
+                border_style="dim",
+                expand=True,
             )
+            table.add_column("#", justify="right", style="bold", min_width=3)
+            table.add_column("股票", min_width=16)
+            table.add_column("回购金额", justify="right", min_width=14)
+            table.add_column("回购数量", justify="right", min_width=16)
+            table.add_column("本轮累计回购", justify="right", min_width=10)
+            table.add_column("本轮累计占比", justify="right", min_width=8)
 
-        self._console.print(table)
-        self._console.print(f"共 {len(items)} 家公司进行回购")
+            for rank, item in enumerate(group, 1):
+                stock_display = f"{item.stock_code} {item.stock_name.get('zh-CN', '')}"
+
+                qty_parts = [f"{item.total_quantity:,}"]
+                if item.for_cancellation > 0:
+                    qty_parts.append("[green](C)[/green]")
+                if item.for_treasury > 0:
+                    qty_parts.append("(T)")
+                qty_display = " ".join(qty_parts)
+
+                table.add_row(
+                    str(rank),
+                    stock_display,
+                    f"{item.total_amount:,.2f}",
+                    qty_display,
+                    f"{item.cumulative_quantity:,}"
+                    if item.cumulative_quantity > 0
+                    else "—",
+                    f"{item.cumulative_pct:.4f}%" if item.cumulative_pct > 0 else "—",
+                )
+
+            self._console.print(table)
+            self._console.print()
+
+        unique_companies = len({item.stock_code for item in items})
+        self._console.print(f"共 {unique_companies} 家公司进行回购")
+        self._console.print()
+        self._console.print(
+            "[dim]* 「本轮累计回购」指最新的股东大会决议案通过后的回购累计数量[/dim]"
+        )
+        self._console.print(
+            "[dim]* 「本轮累计占比」指累计回购股份数占最新的股东大会决议案通过当日的已发行股份（不包含库存股）的百分比[/dim]"
+        )
 
 
 # ── 数据导出 ──
@@ -183,13 +214,16 @@ class Exporter:
                 "rank": item.rank,
                 "stock_code": item.stock_code,
                 "stock_name": item.stock_name,
+                "currency": item.currency,
                 "total_amount": item.total_amount,
                 "total_quantity": item.total_quantity,
                 "high_price": item.high_price,
                 "low_price": item.low_price,
                 "action_count": item.action_count,
                 "cumulative_quantity": item.cumulative_quantity,
-                "cumulative_percentage": item.cumulative_percentage,
+                "cumulative_pct": item.cumulative_pct,
+                "for_cancellation": item.for_cancellation,
+                "for_treasury": item.for_treasury,
             }
             for item in items
         ]
@@ -205,13 +239,16 @@ class Exporter:
                 "rank",
                 "stock_code",
                 "stock_name",
+                "currency",
                 "total_amount",
                 "total_quantity",
                 "high_price",
                 "low_price",
                 "action_count",
                 "cumulative_quantity",
-                "cumulative_percentage",
+                "cumulative_pct",
+                "for_cancellation",
+                "for_treasury",
             ]
         )
         for item in items:
@@ -220,13 +257,16 @@ class Exporter:
                     item.rank,
                     item.stock_code,
                     item.stock_name,
+                    item.currency,
                     item.total_amount,
                     item.total_quantity,
                     item.high_price,
                     item.low_price,
                     item.action_count,
                     item.cumulative_quantity,
-                    item.cumulative_percentage,
+                    item.cumulative_pct,
+                    item.for_cancellation,
+                    item.for_treasury,
                 ]
             )
         return output.getvalue()
@@ -250,20 +290,20 @@ class DailyRanking:
         self._renderer = renderer or Renderer()
         self._exporter = exporter or Exporter()
         self._items: list[RankingItem] = []
-        self._transaction_date: date | None = None
+        self._trade_date: date | None = None
 
     @property
     def items(self) -> list[RankingItem]:
         return self._items
 
     @property
-    def transaction_date(self) -> date | None:
-        return self._transaction_date
+    def trade_date(self) -> date | None:
+        return self._trade_date
 
-    def load(self, transaction_date: date) -> None:
+    def load(self, trade_date: date) -> None:
         """加载指定交易日的回购数据并聚合。"""
-        self._transaction_date = transaction_date
-        records = self._fetcher.fetch(transaction_date)
+        self._trade_date = trade_date
+        records = self._fetcher.fetch(trade_date)
         if not records:
             self._items = []
             return
@@ -274,9 +314,9 @@ class DailyRanking:
 
     def print(self, top_n: int = 0) -> None:
         """打印排行榜到控制台。"""
-        if not self._transaction_date:
+        if not self._trade_date:
             raise RuntimeError("请先调用 load() 加载数据")
-        self._renderer.render(self._transaction_date, self._items, top_n)
+        self._renderer.render(self._trade_date, self._items, top_n)
 
     def to_json(self, indent: int = 2, top_n: int = 0) -> str:
         """导出为 JSON 字符串。"""
