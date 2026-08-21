@@ -8,7 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from modules.upload_hkex_srrpt import MAX_WORKERS, upload_file
+from modules.hkex_srrpt.upload_hkex_srrpt import MAX_WORKERS, upload_file
 
 DEFAULT_INPUT_DIR = Path("output/srrpt")
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from modules.parse_hkex_srrpt import HKEXSrrptParser
+from modules.hkex_srrpt.parse_hkex_srrpt import HKEXSrrptParser
 
 DEFAULT_INPUT_DIR = Path("downloads/srrpt")
 DEFAULT_OUTPUT_DIR = Path("output/srrpt")

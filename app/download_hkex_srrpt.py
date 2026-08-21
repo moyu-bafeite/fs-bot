@@ -7,7 +7,7 @@ from datetime import date
 
 from rich.console import Console
 
-from modules.download_hkex_srrpt import HKEXSrrptDownloader
+from modules.hkex_srrpt.download_hkex_srrpt import HKEXSrrptDownloader
 
 
 def _parse_date(value: str) -> date:

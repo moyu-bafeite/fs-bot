@@ -7,7 +7,7 @@ import argparse
 import sys
 from datetime import date
 
-from modules.daily_ranking import DailyRanking
+from analysis.daily_ranking import DailyRanking
 
 
 def parse_args() -> argparse.Namespace:
