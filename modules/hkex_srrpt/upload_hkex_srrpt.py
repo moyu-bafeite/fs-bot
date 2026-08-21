@@ -58,28 +58,10 @@ def upload_file(file: Path, dry_run: bool = False) -> tuple[Path, int, str | Non
         if dry_run:
             return file, len(rows), None
 
-        _md_client.table(TABLE_NAME).insert(rows).execute()
+        _md_client.table(TABLE_NAME).upsert(
+            rows,
+            on_conflict="report_date,stock_code,sec_type,trade_date,quantity,amount",
+        ).execute()
         return file, len(rows), None
     except Exception as e:
         return file, 0, str(e)
-
-
-def upload_files(
-    files: list[Path],
-    dry_run: bool = False,
-    max_workers: int = MAX_WORKERS,
-) -> tuple[int, list[tuple[Path, str]]]:
-    """并发上传多个文件，返回 (总记录数, 失败列表)。"""
-    total_rows = 0
-    failed: list[tuple[Path, str]] = []
-
-    with ThreadPoolExecutor(max_workers=min(max_workers, MAX_WORKERS)) as executor:
-        futures = {executor.submit(upload_file, f, dry_run): f for f in files}
-        for future in as_completed(futures):
-            file, count, error = future.result()
-            if error:
-                failed.append((file, error))
-            else:
-                total_rows += count
-
-    return total_rows, failed
