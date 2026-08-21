@@ -36,11 +36,12 @@ FIELD_MAP = {
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="上传港交所股份回购报告到 Supabase")
+    p.add_argument("--file", type=Path, default=None, help="指定单个 JSON 文件，优先于 --input-dir")
     p.add_argument(
         "--input-dir",
         type=Path,
         default=DEFAULT_INPUT_DIR,
-        help="JSON 文件目录（默认 output/srrpt）",
+        help="JSON 文件目录（默认 output/srrpt），--file 优先",
     )
     p.add_argument("--workers", type=int, default=MAX_WORKERS, help="并发线程数")
     p.add_argument("--dry-run", action="store_true", help="仅打印，不实际插入")
@@ -83,7 +84,11 @@ def main(args: argparse.Namespace | None = None) -> None:
         args = parse_args()
 
     console = Console()
-    files = sorted(args.input_dir.glob("*.json"))
+
+    if args.file:
+        files = [args.file]
+    else:
+        files = sorted(args.input_dir.glob("*.json"))
 
     if not files:
         console.print(f"[yellow]未找到 JSON 文件: {args.input_dir}[/yellow]")
