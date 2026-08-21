@@ -14,8 +14,6 @@ def main() -> None:
         nargs="?",
         choices=[
             "sync-hk-stocks",
-            "fetch-hk-repurchase-actions",
-            "push-hk-repurchase-actions",
             "generate-daily-ranking",
             "download-hkex-srrpt",
             "parse-hkex-srrpt",
@@ -46,36 +44,6 @@ def main() -> None:
 
         count = sync()
         print(f"完成，共写入 {count} 条股票记录")
-
-    elif args.type == "fetch-hk-repurchase-actions":
-        import sys
-
-        from app.fetch_hk_repurchase_actions import main as fetch_repurchase_main
-
-        old_argv = sys.argv
-        try:
-            if args.help:
-                sys.argv = ["fetch-hk-repurchase-actions", "--help"]
-            else:
-                sys.argv = ["fetch-hk-repurchase-actions"] + remaining
-            fetch_repurchase_main()
-        finally:
-            sys.argv = old_argv
-
-    elif args.type == "push-hk-repurchase-actions":
-        import sys
-
-        from app.push_hk_repurchase_actions import main as push_repurchase_main
-
-        old_argv = sys.argv
-        try:
-            if args.help:
-                sys.argv = ["push-hk-repurchase-actions", "--help"]
-            else:
-                sys.argv = ["push-hk-repurchase-actions"] + remaining
-            push_repurchase_main()
-        finally:
-            sys.argv = old_argv
 
     elif args.type == "generate-daily-ranking":
         import sys
