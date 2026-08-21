@@ -13,7 +13,7 @@ def main() -> None:
         "type",
         nargs="?",
         choices=[
-            "sync-hk-stocks-handler",
+            "hk-stocks-handler",
             "daily-ranking",
             "hkex-srrpt-downloader",
             "hkex-srrpt-parser",

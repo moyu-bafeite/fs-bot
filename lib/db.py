@@ -144,7 +144,7 @@ def get_hkex_repurchase_reports(trade_date: str) -> list[dict[str, Any]]:
     offset = 0
     while True:
         resp = (
-            _md_client.table("hk_hkex_repurchase_reports")
+            _md_client.table("hkex_repurchase_reports")
             .select("*")
             .eq("trade_date", trade_date)
             .range(offset, offset + page_size - 1)

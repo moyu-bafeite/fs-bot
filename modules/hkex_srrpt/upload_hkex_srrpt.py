@@ -11,7 +11,7 @@ from pathlib import Path
 
 from lib.db import _md_client
 
-TABLE_NAME = "hk_hkex_repurchase_reports"
+TABLE_NAME = "hkex_repurchase_reports"
 MAX_WORKERS = 100
 
 # JSON 字段 -> 表字段映射
