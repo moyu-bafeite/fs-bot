@@ -13,11 +13,11 @@ def main() -> None:
         "type",
         nargs="?",
         choices=[
-            "sync-hk-stocks",
-            "generate-daily-ranking",
-            "download-hkex-srrpt",
-            "parse-hkex-srrpt",
-            "upload-hkex-srrpt",
+            "sync-hk-stocks-handler",
+            "daily-ranking",
+            "hkex-srrpt-downloader",
+            "hkex-srrpt-parser",
+            "hkex-srrpt-uploader",
         ],
         help="任务类型",
     )
@@ -39,13 +39,13 @@ def main() -> None:
         parser.print_help()
         return
 
-    if args.type == "sync-hk-stocks":
+    if args.type == "hk-stocks-handler":
         from app.sync_hk_stocks import sync
 
         count = sync()
         print(f"完成，共写入 {count} 条股票记录")
 
-    elif args.type == "generate-daily-ranking":
+    elif args.type == "daily-ranking":
         import sys
 
         from app.generate_daily_ranking import main as generate_ranking_main
@@ -60,47 +60,47 @@ def main() -> None:
         finally:
             sys.argv = old_argv
 
-    elif args.type == "download-hkex-srrpt":
+    elif args.type == "hkex-srrpt-downloader":
         import sys
 
-        from app.download_hkex_srrpt import main as download_srrpt_main
+        from app.hkex_srrpt_downloader import main as download_srrpt_main
 
         old_argv = sys.argv
         try:
             if args.help:
-                sys.argv = ["download-hkex-srrpt", "--help"]
+                sys.argv = ["hkex-srrpt-downloader", "--help"]
             else:
-                sys.argv = ["download-hkex-srrpt"] + remaining
+                sys.argv = ["hkex-srrpt-downloader"] + remaining
             download_srrpt_main()
         finally:
             sys.argv = old_argv
 
-    elif args.type == "parse-hkex-srrpt":
+    elif args.type == "hkex-srrpt-parser":
         import sys
 
-        from app.parse_hkex_srrpt import main as parse_srrpt_main
+        from app.hkex_srrpt_parser import main as parse_srrpt_main
 
         old_argv = sys.argv
         try:
             if args.help:
-                sys.argv = ["parse-hkex-srrpt", "--help"]
+                sys.argv = ["hkex-srrpt-parser", "--help"]
             else:
-                sys.argv = ["parse-hkex-srrpt"] + remaining
+                sys.argv = ["hkex-srrpt-parser"] + remaining
             parse_srrpt_main()
         finally:
             sys.argv = old_argv
 
-    elif args.type == "upload-hkex-srrpt":
+    elif args.type == "hkex-srrpt-uploader":
         import sys
 
-        from app.upload_hkex_srrpt import main as upload_srrpt_main
+        from app.hkex_srrpt_uploader import main as upload_srrpt_main
 
         old_argv = sys.argv
         try:
             if args.help:
-                sys.argv = ["upload-hkex-srrpt", "--help"]
+                sys.argv = ["hkex-srrpt-uploader", "--help"]
             else:
-                sys.argv = ["upload-hkex-srrpt"] + remaining
+                sys.argv = ["hkex-srrpt-uploader"] + remaining
             upload_srrpt_main()
         finally:
             sys.argv = old_argv
