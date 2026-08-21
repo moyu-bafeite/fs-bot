@@ -3,35 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from rich.console import Console
 
-from lib.db import _md_client
+from modules.upload_hkex_srrpt import MAX_WORKERS, upload_file
 
 DEFAULT_INPUT_DIR = Path("output/srrpt")
-MAX_WORKERS = 100
-TABLE_NAME = "hk_hkex_repurchase_reports"
-
-# JSON 字段 -> 表字段映射
-FIELD_MAP = {
-    "report_date": "report_date",
-    "stock_code": "stock_code",
-    "sec_type": "sec_type",
-    "trade_date": "trade_date",
-    "quantity": "quantity",
-    "high_price": "high_price",
-    "low_price": "low_price",
-    "currency": "currency",
-    "amount": "amount",
-    "method": "method",
-    "for_cancellation": "for_cancellation",
-    "for_treasury": "for_treasury",
-    "under_mandate": "cumulative_quantity",
-    "pct_of_issued": "cumulative_pct",
-}
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,37 +25,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--workers", type=int, default=MAX_WORKERS, help="并发线程数")
     p.add_argument("--dry-run", action="store_true", help="仅打印，不实际插入")
     return p.parse_args()
-
-
-def _transform_record(record: dict) -> dict:
-    """将 JSON 记录转换为表字段。"""
-    row = {}
-    for json_key, db_col in FIELD_MAP.items():
-        row[db_col] = record.get(json_key)
-    return row
-
-
-def _read_json_file(file: Path) -> list[dict]:
-    """读取单个 JSON 文件，返回转换后的记录列表。"""
-    with open(file, encoding="utf-8") as f:
-        data = json.load(f)
-    return [_transform_record(r) for r in data]
-
-
-def _upload_file(file: Path, dry_run: bool) -> tuple[Path, int, str | None]:
-    """处理单个文件，返回 (文件路径, 记录数, 错误信息或 None)。"""
-    try:
-        rows = _read_json_file(file)
-        if not rows:
-            return file, 0, None
-
-        if dry_run:
-            return file, len(rows), None
-
-        _md_client.table(TABLE_NAME).insert(rows).execute()
-        return file, len(rows), None
-    except Exception as e:
-        return file, 0, str(e)
 
 
 def main(args: argparse.Namespace | None = None) -> None:
@@ -102,7 +50,7 @@ def main(args: argparse.Namespace | None = None) -> None:
     failed: list[tuple[Path, str]] = []
 
     with ThreadPoolExecutor(max_workers=min(args.workers, MAX_WORKERS)) as executor:
-        futures = {executor.submit(_upload_file, f, args.dry_run): f for f in files}
+        futures = {executor.submit(upload_file, f, args.dry_run): f for f in files}
         for future in as_completed(futures):
             file, count, error = future.result()
             if error:
