@@ -18,6 +18,7 @@ def main() -> None:
             "hkex-srrpt-downloader",
             "hkex-srrpt-parser",
             "hkex-srrpt-uploader",
+            "stock-price-handler",
         ],
         help="任务类型",
     )
@@ -102,6 +103,21 @@ def main() -> None:
             else:
                 sys.argv = ["hkex-srrpt-uploader"] + remaining
             upload_srrpt_main()
+        finally:
+            sys.argv = old_argv
+
+    elif args.type == "stock-price-handler":
+        import sys
+
+        from app.stock_price_handler.cli import main as sph_main
+
+        old_argv = sys.argv
+        try:
+            if args.help:
+                sys.argv = ["stock-price-handler", "--help"]
+            else:
+                sys.argv = ["stock-price-handler"] + remaining
+            sph_main()
         finally:
             sys.argv = old_argv
 

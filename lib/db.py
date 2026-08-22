@@ -158,3 +158,65 @@ def get_hkex_repurchase_reports(trade_date: str) -> list[dict[str, Any]]:
             break
         offset += page_size
     return records
+
+
+# ── 日K线数据操作 ──
+
+
+def upsert_br_daily_prices(records: list[dict[str, Any]]) -> int:
+    """批量 upsert 前复权日K数据。"""
+    if not records:
+        return 0
+    resp = (
+        _md_client.table("hk_br_daily_prices")
+        .upsert(records, on_conflict="stock_code,trade_date")
+        .execute()
+    )
+    return len(resp.data or [])
+
+
+def upsert_nr_daily_prices(records: list[dict[str, Any]]) -> int:
+    """批量 upsert 不复权日K数据。"""
+    if not records:
+        return 0
+    resp = (
+        _md_client.table("hk_nr_daily_prices")
+        .upsert(records, on_conflict="stock_code,trade_date")
+        .execute()
+    )
+    return len(resp.data or [])
+
+
+def get_daily_prices(
+    stock_code: str, right: str = "NR", limit: int = 0
+) -> list[dict[str, Any]]:
+    """查询指定标的的日K数据。
+
+    Args:
+        stock_code: 股票代码
+        right: "NR" 或 "BR"
+        limit: 返回条数上限，0 表示全部
+    """
+    table_name = "hk_br_daily_prices" if right == "BR" else "hk_nr_daily_prices"
+    records: list[dict[str, Any]] = []
+    page_size = min(limit, 1000) if limit > 0 else 1000
+    offset = 0
+    while True:
+        query = (
+            _md_client.table(table_name)
+            .select("*")
+            .eq("stock_code", stock_code)
+            .order("trade_date")
+            .range(offset, offset + page_size - 1)
+        )
+        resp = query.execute()
+        rows = resp.data or []
+        if not rows:
+            break
+        records.extend(rows)
+        if limit > 0 and len(records) >= limit:
+            return records[:limit]
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return records

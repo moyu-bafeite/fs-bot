@@ -31,3 +31,4 @@ output/
 .ruff_cache/
 
 test.py
+tiger_openapi.properties

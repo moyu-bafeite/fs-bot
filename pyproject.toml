@@ -13,6 +13,7 @@ dependencies = [
     "pyrate-limiter>=4.4.0",
     "opencc-python-reimplemented>=0.1.7",
     "xlrd>=2.0.2",
+    "tigeropen>=3.7",
 ]
 
 [project.optional-dependencies]
