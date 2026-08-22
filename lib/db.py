@@ -163,3 +163,21 @@ def upsert_nr_daily_prices(records: list[dict[str, Any]]) -> int:
         .execute()
     )
     return len(resp.data or [])
+
+
+# ── 回购公告链接操作 ──
+
+
+def upsert_repurchase_announcements(records: list[dict[str, Any]]) -> int:
+    """批量 upsert 回购公告链接。"""
+    if not records:
+        return 0
+    resp = (
+        _md_client.table("hkex_repurchase_announcements")
+        .upsert(
+            records,
+            on_conflict="stock_code,release_time,document_url",
+        )
+        .execute()
+    )
+    return len(resp.data or [])
