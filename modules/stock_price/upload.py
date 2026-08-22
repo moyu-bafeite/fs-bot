@@ -13,9 +13,9 @@ from pyrate_limiter import Duration, Limiter, Rate
 from rich.console import Console
 
 from lib.db import upsert_br_daily_prices, upsert_nr_daily_prices
+from lib.manifest import MANIFEST_NAME, Manifest
 
 DEFAULT_INPUT_DIR = Path("downloads/stock_price")
-MANIFEST_NAME = "_manifest.json"
 
 # 限流: 每秒最多 10 个请求
 _RATE = Rate(10, Duration.SECOND)
@@ -67,11 +67,10 @@ class StockPriceUploader:
             return []
 
         # 读取 manifest，跳过已上传
-        manifest_path = files[0].parent / MANIFEST_NAME
-        manifest = _load_manifest(manifest_path)
+        manifest = Manifest(files[0].parent / MANIFEST_NAME)
 
-        pending = [f for f in files if f.name not in manifest]
-        skipped = [f for f in files if f.name in manifest]
+        pending = [f for f in files if not manifest.contains(f.name)]
+        skipped = [f for f in files if manifest.contains(f.name)]
 
         if skipped:
             self.console.print(f"跳过 {len(skipped)} 个已上传文件")
@@ -101,7 +100,7 @@ class StockPriceUploader:
         # 更新 manifest
         if succeeded and not dry_run:
             manifest.update(succeeded)
-            _save_manifest(manifest_path, manifest)
+            manifest.save()
 
         total = sum(r.records_count for r in results if r.success)
         fail = sum(1 for r in results if not r.success)
@@ -151,17 +150,3 @@ class StockPriceUploader:
 
         except Exception as e:
             return UploadResult(file, "", 0, False, str(e))
-
-
-def _load_manifest(manifest_path: Path) -> dict[str, int]:
-    """读取 manifest，返回 {文件名: 记录数}。"""
-    if manifest_path.exists():
-        with open(manifest_path, encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-
-def _save_manifest(manifest_path: Path, manifest: dict[str, int]) -> None:
-    """保存 manifest。"""
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, ensure_ascii=False, indent=2)

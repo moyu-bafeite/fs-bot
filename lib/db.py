@@ -160,6 +160,21 @@ def get_hkex_repurchase_reports(trade_date: str) -> list[dict[str, Any]]:
     return records
 
 
+def upsert_repurchase_reports(records: list[dict[str, Any]]) -> int:
+    """批量 upsert 港交所回购报告。"""
+    if not records:
+        return 0
+    resp = (
+        _md_client.table("hkex_repurchase_reports")
+        .upsert(
+            records,
+            on_conflict="report_date,stock_code,sec_type,trade_date,quantity,amount",
+        )
+        .execute()
+    )
+    return len(resp.data or [])
+
+
 # ── 日K线数据操作 ──
 
 

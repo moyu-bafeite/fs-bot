@@ -16,15 +16,12 @@ _EXCLUDE_KEYWORDS = re.compile(
     r"ETF|REIT|FUND|TRUST|BOND|NOTE|TBILL|GILT", re.IGNORECASE
 )
 
-# 排除衍生品：PRC债券、认股权证(W+数字)、票据(N+数字)、债券(B+数字)
 _DERIVATIVE_PATTERN = re.compile(
     r"PRC B\d|W\d{2,4}$|\sN\d{3,4}|\sB\d{3,4}|HSDIV", re.IGNORECASE
 )
 
-# 排除杠杆/反向产品（FL2/XL2/FI2/XI2 等前缀）
 _LEVERAGED_INVERSE = re.compile(r"^(FL|XL|FI|XI)\d?", re.IGNORECASE)
 
-# 排除 ETF/基金产品（名称以基金公司缩写开头或含产品类型关键词）
 _ETF_PATTERN = re.compile(
     r"^(CSOP|ISHARES|GX |A GX|A CSOP|AMUNDI|PREMIA|INVESCO|HGI |BOCGBA|"
     r"HSCMS|PKSA|TRMSCI|A CICC|A BOS|A HS|A TK|A VP|A DOO|A PANDO|"

@@ -1,7 +1,7 @@
 [project]
-name = "fs-bot"
+name = "hk-bot"
 version = "0.1.0"
-description = "港交所年报/中报爬虫"
+description = "港股数据工具链"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,7 +9,6 @@ dependencies = [
     "supabase>=2.0",
     "python-dotenv>=1.0",
     "rich>=13.0",
-    "futu-api>=10.7",
     "pyrate-limiter>=4.4.0",
     "opencc-python-reimplemented>=0.1.7",
     "xlrd>=2.0.2",

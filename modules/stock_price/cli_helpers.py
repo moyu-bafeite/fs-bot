@@ -1,45 +1,33 @@
-"""股价数据下载器：从 Tiger API 获取日K线数据，保存到本地 JSON 文件。
+"""股价数据下载 CLI 包装层。
 
-支持增量更新：检测已有文件的最大日期，只拉取新增数据。
+调用 modules.stock_price.download 执行实际下载，
+本层只负责参数解析、数据库标的解析、Rich 进度展示。
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
-from typing import Any
 
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from tigeropen.common.consts import QuoteRight
 
 from lib.db import get_hk_stocks
+from modules.stock_price.download import DownloadResult, download_one
 from modules.stock_price.tiger_kline import TigerKlineFetcher
 
 _DEFAULT_DIR = Path("downloads/stock_price")
 
 
-@dataclass(frozen=True)
-class DownloadResult:
-    """单个文件的下载结果。"""
-
-    stock_code: str
-    right: str
-    path: Path | None
-    records_count: int
-    success: bool
-    error: str = ""
-
-
 @dataclass
 class StockPriceDownloader:
-    """股价数据下载器。
+    """股价数据下载器（CLI 包装）。
 
     用法::
 
-        dl = StockPriceDownloader()
+        dl = StockPriceDownloader(fetcher=TigerKlineFetcher())
         results = dl.download(
             tickers=["00700", "09988"],
             start_date=date(2024, 1, 1),
@@ -102,7 +90,15 @@ class StockPriceDownloader:
 
             for ticker, label, right in tasks:
                 progress.update(task_id, description=f"{ticker} ({label})")
-                result = self._download_one(ticker, label, right, start_date, end_date)
+                result = download_one(
+                    self.fetcher,
+                    self.output_dir,
+                    ticker,
+                    label,
+                    right,
+                    start_date,
+                    end_date,
+                )
                 results.append(result)
                 progress.advance(task_id)
 
@@ -112,58 +108,3 @@ class StockPriceDownloader:
         self.console.print(f"完成: {ok - skip} 新增, {skip} 跳过, {fail} 失败")
 
         return results
-
-    def _download_one(
-        self,
-        stock_code: str,
-        right_label: str,
-        right: QuoteRight,
-        start_date: date,
-        end_date: date,
-    ) -> DownloadResult:
-        """下载单个标的的一种复权数据。"""
-        file_path = self.output_dir / f"{stock_code}_{right_label}.json"
-
-        # 增量逻辑：读取已有文件的最大日期
-        effective_start = start_date
-        existing_records: list[dict[str, Any]] = []
-
-        if file_path.exists():
-            try:
-                with open(file_path, encoding="utf-8") as f:
-                    data = json.load(f)
-                existing_records = data.get("records", [])
-                if existing_records:
-                    max_date_str = max(r["trade_date"] for r in existing_records)
-                    max_date = date.fromisoformat(max_date_str)
-                    effective_start = max_date + timedelta(days=1)
-            except (json.JSONDecodeError, KeyError, ValueError):
-                # 文件损坏，重新下载
-                existing_records = []
-
-        if effective_start > end_date:
-            return DownloadResult(stock_code, right_label, file_path, 0, True)
-
-        try:
-            new_records = self.fetcher.fetch_daily(stock_code, effective_start, end_date, right)
-        except Exception as e:
-            return DownloadResult(stock_code, right_label, None, 0, False, str(e))
-
-        # 合并新旧数据
-        all_records = existing_records + new_records
-        # 按日期去重（以新数据为准）
-        seen: dict[str, dict] = {}
-        for rec in all_records:
-            seen[rec["trade_date"]] = rec
-        merged = sorted(seen.values(), key=lambda r: r["trade_date"])
-
-        # 写入文件
-        output = {
-            "stock_code": stock_code,
-            "right": right_label,
-            "records": merged,
-        }
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(output, f, ensure_ascii=False, indent=2)
-
-        return DownloadResult(stock_code, right_label, file_path, len(new_records), True)

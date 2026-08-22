@@ -6,12 +6,10 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from lib.db import _md_client
+from lib.db import upsert_repurchase_reports
 
-TABLE_NAME = "hkex_repurchase_reports"
 MAX_WORKERS = 100
 
 # JSON 字段 -> 表字段映射
@@ -58,10 +56,7 @@ def upload_file(file: Path, dry_run: bool = False) -> tuple[Path, int, str | Non
         if dry_run:
             return file, len(rows), None
 
-        _md_client.table(TABLE_NAME).upsert(
-            rows,
-            on_conflict="report_date,stock_code,sec_type,trade_date,quantity,amount",
-        ).execute()
-        return file, len(rows), None
+        count = upsert_repurchase_reports(rows)
+        return file, count, None
     except Exception as e:
         return file, 0, str(e)

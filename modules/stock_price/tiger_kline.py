@@ -36,7 +36,9 @@ class TigerKlineFetcher:
         records = fetcher.fetch_daily("00700", date(2024, 1, 1), date(2024, 12, 31), QuoteRight.NR)
     """
 
-    def __init__(self, client: QuoteClient | None = None, config_path: str | None = None) -> None:
+    def __init__(
+        self, client: QuoteClient | None = None, config_path: str | None = None
+    ) -> None:
         self._client = client or _create_quote_client(config_path)
 
     def fetch_daily(
