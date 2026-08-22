@@ -80,7 +80,7 @@ class DataFetcherLocal:
         date_str = trade_date.isoformat()
         records: list[dict[str, Any]] = []
 
-        with ThreadPoolExecutor(max_workers=10) as pool:
+        with ThreadPoolExecutor(max_workers=100) as pool:
             futures = {pool.submit(_load_json_file, f): f for f in files}
             for future in as_completed(futures):
                 try:
