@@ -24,7 +24,6 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from lib.db import (
     get_unparsed_announcements,
     mark_announcement_parsed,
-    upsert_repurchase_reports,
 )
 
 _DOWNLOAD_DIR = Path("downloads/srann")
@@ -204,17 +203,31 @@ def _validate_records(records: list[dict]) -> list[str]:
 
 
 def _filename_from_url(url: str, stock_code: str) -> str:
-    """从 URL 生成本地文件名。"""
-    # URL 如 .../2026082101998_c.pdf
+    """从 URL 生成本地 PDF 文件名。"""
     name = url.rsplit("/", 1)[-1]
     return f"{stock_code}_{name}"
 
 
+def _dedup_key(rec: dict) -> tuple:
+    """记录去重键：(stock_code, trade_date, quantity, amount)。"""
+    return (rec.get("stock_code", ""), rec.get("trade_date", ""), rec.get("quantity", 0), rec.get("amount", 0))
+
+
+def _merge_records(existing: list[dict], new: list[dict]) -> list[dict]:
+    """合并新旧记录，按 dedup_key 去重（新数据优先）。"""
+    seen: dict[tuple, dict] = {}
+    for rec in existing:
+        seen[_dedup_key(rec)] = rec
+    for rec in new:
+        seen[_dedup_key(rec)] = rec
+    return sorted(seen.values(), key=lambda r: (r.get("stock_code", ""), r.get("trade_date", "")))
+
+
 def parse_all(
     console: Console | None = None,
-    workers: int = 2000,
+    workers: int = 5,
 ) -> list[ParseResult]:
-    """遍历所有未解析公告，多线程下载 PDF → LLM 解析 → 保存 JSON。"""
+    """遍历所有未解析公告，多线程下载 PDF → LLM 解析 → 按 trade_date 保存 JSON。"""
     con = console or Console()
     _DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -232,6 +245,8 @@ def parse_all(
     )
 
     results: list[ParseResult] = []
+    # 按 trade_date 收集所有记录
+    date_records: dict[str, list[dict]] = {}
     lock = threading.Lock()
 
     with Progress(
@@ -249,10 +264,14 @@ def parse_all(
                 for ann in announcements
             }
             for future in as_completed(futures):
-                ann = futures[future]
-                result = future.result()
+                result, records = future.result()
                 with lock:
                     results.append(result)
+                    if result.success and records:
+                        for rec in records:
+                            td = rec.get("trade_date", "")
+                            if td:
+                                date_records.setdefault(td, []).append(rec)
                     label = f"{result.stock_code} {result.release_time[:10]}"
                     if result.success:
                         con.print(
@@ -262,23 +281,39 @@ def parse_all(
                         con.print(f"[red]✗[/red] {label}: {result.error}")
                     progress.advance(task_id)
 
+    # 按 trade_date 增量合并写入文件
+    for td, new_records in sorted(date_records.items()):
+        out_path = _OUTPUT_DIR / f"{td.replace('-', '')}.json"
+        existing: list[dict] = []
+        if out_path.exists():
+            try:
+                existing = json.loads(out_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = []
+        merged = _merge_records(existing, new_records)
+        out_path.write_text(
+            json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
     ok = sum(1 for r in results if r.success)
     fail = len(results) - ok
     total = sum(r.records_count for r in results if r.success)
-    con.print(f"\n完成: {ok} 成功, {fail} 失败, 共 {total} 条记录")
+    con.print(f"\n完成: {ok} 成功, {fail} 失败, 共 {total} 条记录, {len(date_records)} 个日期文件")
 
     return results
 
 
-def _parse_one(client: OpenAI, ann: dict) -> ParseResult:
-    """处理单条公告：下载 → 提取 → LLM 解析 → 保存。"""
+def _parse_one(client: OpenAI, ann: dict) -> tuple[ParseResult, list[dict]]:
+    """处理单条公告：下载 → 提取 → LLM 解析 → 校验。返回 (结果, 有效记录)。"""
     stock_code = ann["stock_code"]
     release_time = ann["release_time"]
     document_url = ann["document_url"]
 
     filename = _filename_from_url(document_url, stock_code)
     pdf_path = _DOWNLOAD_DIR / filename
-    json_path = _OUTPUT_DIR / filename.replace(".pdf", ".json")
+
+    def _fail(error: str) -> tuple[ParseResult, list[dict]]:
+        return ParseResult(stock_code, release_time, document_url, 0, False, error), []
 
     try:
         # 1. 下载 PDF
@@ -288,42 +323,27 @@ def _parse_one(client: OpenAI, ann: dict) -> ParseResult:
         # 2. 提取文本
         text = _extract_text(pdf_path)
         if not text.strip():
-            return ParseResult(
-                stock_code, release_time, document_url, 0, False, "PDF 无文本内容"
-            )
+            return _fail("PDF 无文本内容")
 
         # 3. LLM 解析
         records = _parse_with_llm(client, text)
 
-        # 3.5 Post Process
+        # 4. Post Process
         for record in records:
             record["stock_code"] = stock_code
 
-        # 4. Schema 校验
+        # 5. Schema 校验
         errors = _validate_records(records)
         if errors:
-            # 保存 JSON 供人工复核
-            json_path.write_text(
-                json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            return ParseResult(
-                stock_code, release_time, document_url, 0, False,
-                f"校验失败 ({len(errors)} 项): {errors[0]}"
-            )
+            return _fail(f"校验失败 ({len(errors)} 项): {errors[0]}")
 
-        # 5. 保存 JSON
-        json_path.write_text(
-            json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-
-        # 6. 写入 Supabase
-        if records:
-            upsert_repurchase_reports(records)
-
-        # 7. 标记已解析
+        # 6. 标记已解析
         mark_announcement_parsed(stock_code, release_time, document_url)
 
-        return ParseResult(stock_code, release_time, document_url, len(records), True)
+        return (
+            ParseResult(stock_code, release_time, document_url, len(records), True),
+            records,
+        )
 
     except Exception as e:
-        return ParseResult(stock_code, release_time, document_url, 0, False, str(e))
+        return _fail(str(e))
