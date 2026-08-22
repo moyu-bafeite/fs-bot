@@ -295,6 +295,10 @@ def _parse_one(client: OpenAI, ann: dict) -> ParseResult:
         # 3. LLM 解析
         records = _parse_with_llm(client, text)
 
+        # 3.5 Post Process
+        for record in records:
+            record["stock_code"] = stock_code
+
         # 4. Schema 校验
         errors = _validate_records(records)
         if errors:
