@@ -165,14 +165,13 @@ def _run_parse(args: argparse.Namespace) -> None:
 def _run_upload(args: argparse.Namespace) -> None:
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from pathlib import Path
-    from pyrate_limiter import Duration, Limiter, Rate
     from rich.console import Console
     from lib.manifest import MANIFEST_NAME, Manifest
-    from modules.srrpt.upload import upload_file
+    from lib.db import upsert_repurchase_reports
+    from modules.srrpt.upload import read_json_file
 
-    rate = Rate(10, Duration.SECOND)
-    limiter = Limiter(rate)
     console = Console()
+    PAGE_SIZE = 1000
 
     if args.file:
         files = [Path(args.file)]
@@ -200,34 +199,67 @@ def _run_upload(args: argparse.Namespace) -> None:
     if args.dry_run:
         console.print("[yellow]DRY RUN 模式[/yellow]")
 
-    total_rows = 0
-    failed_list: list[tuple[Path, str]] = []
-    succeeded: dict[str, int] = {}
+    # Phase 1: 并行读取所有文件
+    all_rows: list[dict] = []
+    failed_reads: list[tuple[Path, str]] = []
+    file_row_counts: dict[str, int] = {}
 
-    def _rate_limited_upload(file: Path, dry_run: bool):
-        limiter.try_acquire("upload", blocking=True)
-        return upload_file(file, dry_run)
+    def _read_file(file: Path):
+        try:
+            rows = read_json_file(file)
+            return file, rows, None
+        except Exception as e:
+            return file, [], str(e)
 
     with ThreadPoolExecutor(max_workers=min(args.workers, 100)) as executor:
-        futures = {
-            executor.submit(_rate_limited_upload, f, args.dry_run): f for f in pending
-        }
+        futures = {executor.submit(_read_file, f): f for f in pending}
         for future in as_completed(futures):
-            file, count, error = future.result()
+            file, rows, error = future.result()
             if error:
-                failed_list.append((file, error))
-                console.print(f"[red]✗[/red] {file.name}: {error}")
+                failed_reads.append((file, error))
+                console.print(f"[red]✗[/red] 读取失败 {file.name}: {error}")
             else:
-                total_rows += count
-                succeeded[file.name] = count
-                console.print(f"[green]✓[/green] {file.name} ({count} 条)")
+                file_row_counts[file.name] = len(rows)
+                all_rows.extend(rows)
+                console.print(f"[green]✓[/green] {file.name} ({len(rows)} 条)")
 
-    if succeeded and not args.dry_run:
-        manifest.update(succeeded)
+    if not all_rows:
+        console.print("[yellow]无数据可上传[/yellow]")
+        return
+
+    console.print(f"\n共读取 {len(all_rows)} 条记录")
+
+    if args.dry_run:
+        console.print("[yellow]DRY RUN 模式，跳过上传[/yellow]")
+        return
+
+    # Phase 2: 分页批量插入
+    total_inserted = 0
+    failed_inserts: list[str] = []
+    pages = (len(all_rows) + PAGE_SIZE - 1) // PAGE_SIZE
+
+    for i in range(0, len(all_rows), PAGE_SIZE):
+        page = all_rows[i : i + PAGE_SIZE]
+        page_num = i // PAGE_SIZE + 1
+        try:
+            count = upsert_repurchase_reports(page)
+            total_inserted += count
+            console.print(f"[green]✓[/green] 第 {page_num}/{pages} 页 ({count} 条)")
+        except Exception as e:
+            failed_inserts.append(f"第 {page_num} 页: {e}")
+            console.print(f"[red]✗[/red] 第 {page_num}/{pages} 页: {e}")
+
+    # 更新 manifest
+    if not failed_inserts and not failed_reads:
+        manifest.update(file_row_counts)
         manifest.save()
 
-    console.print(f"\n完成: {total_rows} 条记录, {len(failed_list)} 个文件失败")
-    if failed_list:
-        console.print("[red]失败文件:[/red]")
-        for f, err in failed_list:
+    console.print(f"\n完成: {total_inserted} 条记录插入")
+    if failed_reads:
+        console.print("[red]读取失败:[/red]")
+        for f, err in failed_reads:
             console.print(f"  {f.name}: {err}")
+    if failed_inserts:
+        console.print("[red]插入失败:[/red]")
+        for err in failed_inserts:
+            console.print(f"  {err}")
