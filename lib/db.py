@@ -181,3 +181,29 @@ def upsert_repurchase_announcements(records: list[dict[str, Any]]) -> int:
         .execute()
     )
     return len(resp.data or [])
+
+
+def get_unparsed_announcements() -> list[dict[str, Any]]:
+    """获取所有未解析的回购公告链接。"""
+    resp = (
+        _md_client.table("hkex_repurchase_announcements")
+        .select("stock_code,release_time,document_url")
+        .eq("parsed", False)
+        .order("release_time")
+        .execute()
+    )
+    return resp.data or []
+
+
+def mark_announcement_parsed(
+    stock_code: str, release_time: str, document_url: str
+) -> None:
+    """标记公告为已解析。"""
+    (
+        _md_client.table("hkex_repurchase_announcements")
+        .update({"parsed": True})
+        .eq("stock_code", stock_code)
+        .eq("release_time", release_time)
+        .eq("document_url", document_url)
+        .execute()
+    )

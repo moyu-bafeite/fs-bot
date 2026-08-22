@@ -20,7 +20,7 @@ from lib.db import upsert_repurchase_announcements
 _POST_URL = "https://www1.hkexnews.hk/search/titlesearch.xhtml"
 
 _PAYLOAD_TEMPLATE = {
-    "lang": "ZH",
+    "lang": "EN",
     "category": "0",
     "market": "SEHK",
     "searchType": "1",
@@ -84,6 +84,9 @@ def _strip_tags(html: str) -> str:
 
 _BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 
+# Document 栏中需要跳过的非回购公告类型
+_SKIP_DOC_KEYWORDS = re.compile(r"Cancelled|Reissued", re.IGNORECASE)
+
 
 def _clean_cell(cell_html: str, first_line: bool = False) -> str:
     """移除移动端标签后提取纯文本。first_line=True 时只取第一行（处理双柜台）。"""
@@ -106,6 +109,11 @@ def _parse_html(html: str, target_date: date) -> list[Announcement]:
         release_time = _clean_cell(cells[0])
         stock_code = _clean_cell(cells[1], first_line=True)
         stock_name = _clean_cell(cells[2], first_line=True)
+
+        # 跳过非回购公告（Cancelled / Reissued 等）
+        doc_text = _clean_cell(cells[3])
+        if _SKIP_DOC_KEYWORDS.search(doc_text):
+            continue
 
         # 提取文档链接
         href_match = _HREF_RE.search(cells[3])
