@@ -183,6 +183,33 @@ def upsert_repurchase_announcements(records: list[dict[str, Any]]) -> int:
     return len(resp.data or [])
 
 
+def get_existing_urls(target_date: str) -> set[str]:
+    """获取指定日期已存在的 document_url 集合，用于增量过滤。
+
+    target_date 格式: YYYY-MM-DD，匹配 release_time 以该日期开头的记录。
+    """
+    urls: set[str] = set()
+    page_size = 1000
+    offset = 0
+    # release_time 格式为 "DD/MM/YYYY HH:MM"，用 like 匹配日期部分
+    year, month, day = target_date.split("-")
+    prefix = f"{day}/{month}/{year}"
+    while True:
+        resp = (
+            _md_client.table("hkex_repurchase_announcements")
+            .select("document_url")
+            .like("release_time", f"{prefix}%")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        urls.update(row["document_url"] for row in rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return urls
+
+
 def get_unparsed_announcements() -> list[dict[str, Any]]:
     """获取所有未解析的回购公告链接。"""
     resp = (

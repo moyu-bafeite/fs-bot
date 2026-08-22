@@ -15,7 +15,7 @@ import httpx
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
-from lib.db import upsert_repurchase_announcements
+from lib.db import get_existing_urls, upsert_repurchase_announcements
 
 _POST_URL = "https://www1.hkexnews.hk/search/titlesearch.xhtml"
 
@@ -211,17 +211,23 @@ def scrape_and_save(
                 results.append(ScrapeResult(d, 0, False, error))
                 con.print(f"[red]✗[/red] {d.isoformat()}: {error}")
             elif announcements:
-                records = [
-                    {
-                        "stock_code": a.stock_code,
-                        "release_time": a.release_time,
-                        "document_url": a.document_url,
-                    }
-                    for a in announcements
-                ]
-                upsert_repurchase_announcements(records)
-                results.append(ScrapeResult(d, len(announcements), True))
-                con.print(f"[green]✓[/green] {d.isoformat()}: {len(announcements)} 条")
+                existing = get_existing_urls(d.isoformat())
+                new_anns = [a for a in announcements if a.document_url not in existing]
+                if new_anns:
+                    records = [
+                        {
+                            "stock_code": a.stock_code,
+                            "release_time": a.release_time,
+                            "document_url": a.document_url,
+                        }
+                        for a in new_anns
+                    ]
+                    upsert_repurchase_announcements(records)
+                    results.append(ScrapeResult(d, len(new_anns), True))
+                    con.print(f"[green]✓[/green] {d.isoformat()}: {len(new_anns)} 条新增")
+                else:
+                    results.append(ScrapeResult(d, 0, True))
+                    con.print(f"[dim]·[/dim] {d.isoformat()}: 无新增")
             else:
                 results.append(ScrapeResult(d, 0, True))
                 con.print(f"[dim]·[/dim] {d.isoformat()}: 无数据")
