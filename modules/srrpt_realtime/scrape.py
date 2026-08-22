@@ -243,11 +243,10 @@ def scrape_and_save(
 
 
 def _generate_dates(start: date, end: date) -> list[date]:
-    """生成工作日列表。"""
+    """生成日期列表（含周末和假期，由 HKEX 响应自行判断是否有数据）。"""
     dates: list[date] = []
     current = start
     while current <= end:
-        if current.weekday() < 5:
-            dates.append(current)
+        dates.append(current)
         current += timedelta(days=1)
     return dates
