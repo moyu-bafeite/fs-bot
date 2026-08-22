@@ -87,43 +87,6 @@ def get_hk_stock_by_code(stock_code: str) -> dict[str, Any] | None:
     return resp.data[0] if resp.data else None
 
 
-def upsert_hk_repurchase_actions(records: list[dict[str, Any]]) -> int:
-    """批量 upsert 港股回购记录。"""
-    if not records:
-        return 0
-    resp = (
-        _md_client.table("hk_repurchase_actions")
-        .upsert(records, on_conflict="stock_code,publish_date,end_date,amount")
-        .execute()
-    )
-    return len(resp.data or [])
-
-
-def get_repurchase_actions_by_transaction_date(
-    end_date: str,
-) -> list[dict[str, Any]]:
-    """分页查询指定交易日的全部回购记录。"""
-    records: list[dict[str, Any]] = []
-    page_size = 1000
-    offset = 0
-    while True:
-        resp = (
-            _md_client.table("hk_repurchase_actions")
-            .select("*")
-            .eq("end_date", end_date)
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        rows = resp.data or []
-        if not rows:
-            break
-        records.extend(rows)
-        if len(rows) < page_size:
-            break
-        offset += page_size
-    return records
-
-
 def get_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
     """批量查询股票名称，返回 {stock_code: {"en": "", "zh-CN": "", "zh-HK": ""}} 映射。"""
     if not stock_codes:
@@ -200,38 +163,3 @@ def upsert_nr_daily_prices(records: list[dict[str, Any]]) -> int:
         .execute()
     )
     return len(resp.data or [])
-
-
-def get_daily_prices(
-    stock_code: str, right: str = "NR", limit: int = 0
-) -> list[dict[str, Any]]:
-    """查询指定标的的日K数据。
-
-    Args:
-        stock_code: 股票代码
-        right: "NR" 或 "BR"
-        limit: 返回条数上限，0 表示全部
-    """
-    table_name = "hk_br_daily_prices" if right == "BR" else "hk_nr_daily_prices"
-    records: list[dict[str, Any]] = []
-    page_size = min(limit, 1000) if limit > 0 else 1000
-    offset = 0
-    while True:
-        query = (
-            _md_client.table(table_name)
-            .select("*")
-            .eq("stock_code", stock_code)
-            .order("trade_date")
-            .range(offset, offset + page_size - 1)
-        )
-        resp = query.execute()
-        rows = resp.data or []
-        if not rows:
-            break
-        records.extend(rows)
-        if limit > 0 and len(records) >= limit:
-            return records[:limit]
-        if len(rows) < page_size:
-            break
-        offset += page_size
-    return records

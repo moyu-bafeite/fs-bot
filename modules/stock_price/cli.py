@@ -84,7 +84,7 @@ def run(args: argparse.Namespace) -> None:
 
 
 def _run_download(args, console) -> None:
-    from modules.stock_price.cli_helpers import StockPriceDownloader
+    from modules.stock_price.download import StockPriceDownloader
     from modules.stock_price.tiger_kline import TigerKlineFetcher
 
     tickers = _parse_tickers(args.tickers)
