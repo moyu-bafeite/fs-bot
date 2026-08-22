@@ -5,14 +5,18 @@ from __future__ import annotations
 import csv
 import io
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from rich.console import Console
 from rich.table import Table
 
 from lib.db import get_hkex_repurchase_reports, get_stock_names
+
+_LOCAL_DATA_DIR = Path("output/srann")
 
 
 # ── 数据模型 ──
@@ -51,6 +55,47 @@ class DataFetcher:
     @staticmethod
     def fetch_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
         """批量获取股票名称映射。"""
+        return get_stock_names(stock_codes)
+
+
+def _load_json_file(path: Path) -> list[dict[str, Any]]:
+    """读取单个 JSON 文件，返回记录列表。"""
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+class DataFetcherLocal:
+    """从本地 output/srann/ 目录读取 LLM 解析的回购数据。"""
+
+    @staticmethod
+    def fetch(trade_date: date) -> list[dict[str, Any]]:
+        """并行读取所有 JSON 文件，筛选指定交易日的记录。"""
+        if not _LOCAL_DATA_DIR.exists():
+            return []
+
+        files = list(_LOCAL_DATA_DIR.glob("*.json"))
+        if not files:
+            return []
+
+        date_str = trade_date.isoformat()
+        records: list[dict[str, Any]] = []
+
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            futures = {pool.submit(_load_json_file, f): f for f in files}
+            for future in as_completed(futures):
+                try:
+                    rows = future.result()
+                    for row in rows:
+                        if row.get("trade_date") == date_str:
+                            records.append(row)
+                except (json.JSONDecodeError, OSError):
+                    continue
+
+        return records
+
+    @staticmethod
+    def fetch_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
+        """股票名称仍从数据库获取。"""
         return get_stock_names(stock_codes)
 
 
@@ -280,7 +325,7 @@ class DailyRanking:
 
     def __init__(
         self,
-        fetcher: DataFetcher | None = None,
+        fetcher: DataFetcher | DataFetcherLocal | None = None,
         aggregator: DataAggregator | None = None,
         renderer: Renderer | None = None,
         exporter: Exporter | None = None,

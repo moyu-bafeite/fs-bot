@@ -22,6 +22,7 @@ def register(subparsers) -> None:
         "--format", choices=["table", "json", "csv"], default="table", help="输出格式"
     )
     dr.add_argument("--output", type=str, default=None, help="输出文件路径")
+    dr.add_argument("--local", action="store_true", help="从本地 output/srann/ 读取数据")
 
     p.set_defaults(func=run)
 
@@ -39,7 +40,7 @@ def run(args: argparse.Namespace) -> None:
 
 
 def _run_daily_ranking(args: argparse.Namespace) -> None:
-    from modules.analysis.daily_ranking import DailyRanking
+    from modules.analysis.daily_ranking import DailyRanking, DataFetcherLocal
 
     try:
         transaction_date = date.fromisoformat(args.date)
@@ -47,7 +48,8 @@ def _run_daily_ranking(args: argparse.Namespace) -> None:
         print(f"错误：日期格式无效 '{args.date}'，应为 YYYY-MM-DD", file=sys.stderr)
         sys.exit(1)
 
-    ranking = DailyRanking()
+    fetcher = DataFetcherLocal() if args.local else None
+    ranking = DailyRanking(fetcher=fetcher)
     ranking.load(transaction_date)
 
     if not ranking.items:
