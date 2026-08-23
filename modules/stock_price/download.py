@@ -131,14 +131,19 @@ class StockPriceDownloader:
                 results.append(result)
                 progress.advance(task_id)
 
+                if not result.success:
+                    self.console.print(
+                        f"  [red]✗ {result.stock_code} ({result.right}): {result.error}[/red]"
+                    )
+                elif result.records_count > 0:
+                    self.console.print(
+                        f"  [green]✓[/green] {result.stock_code} ({result.right}): {result.records_count} 条"
+                    )
+
         ok = sum(1 for r in results if r.success)
         skip = sum(1 for r in results if r.success and r.records_count == 0)
         fail = len(results) - ok
         self.console.print(f"完成: {ok - skip} 新增, {skip} 跳过, {fail} 失败")
-
-        for r in results:
-            if not r.success:
-                self.console.print(f"  [red]✗ {r.stock_code} ({r.right}): {r.error}[/red]")
 
         return results
 
