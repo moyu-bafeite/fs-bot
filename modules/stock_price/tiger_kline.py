@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import time
 from datetime import date
-from typing import Any
+from typing import Any, ClassVar
 
 from tigeropen.common.consts import BarPeriod, QuoteRight
 from tigeropen.quote.quote_client import QuoteClient
@@ -41,12 +41,17 @@ class TigerKlineFetcher:
     ) -> None:
         self._client = client or _create_quote_client(config_path)
 
+    _RIGHT_MAP: ClassVar[dict[str, QuoteRight]] = {
+        "NR": QuoteRight.NR,
+        "BR": QuoteRight.BR,
+    }
+
     def fetch_daily(
         self,
         symbol: str,
         start_date: date,
         end_date: date,
-        right: QuoteRight = QuoteRight.NR,
+        right: str | QuoteRight = QuoteRight.NR,
         max_retries: int = 3,
     ) -> list[dict[str, Any]]:
         """获取单个标的的日K线数据，自动分页。
@@ -55,12 +60,15 @@ class TigerKlineFetcher:
             symbol: 股票代码，如 "00700"
             start_date: 起始日期
             end_date: 结束日期
-            right: 复权方式 QuoteRight.NR(不复权) / QuoteRight.BR(前复权)
+            right: 复权方式 "NR" / "BR" 或 QuoteRight 枚举
             max_retries: 最大重试次数
 
         Returns:
             [{"trade_date", "open", "high", "low", "close", "volume", "turnover"}, ...]
         """
+        if isinstance(right, str):
+            right = self._RIGHT_MAP.get(right.upper(), QuoteRight.NR)
+
         for attempt in range(max_retries):
             try:
                 bars = self._client.get_bars_by_page(

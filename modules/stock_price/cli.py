@@ -1,10 +1,8 @@
 """港股日K线数据 ETL CLI。
 
 子命令:
-  download - 从 Tiger API 下载日K线数据
+  download - 下载日K线数据（支持 --fetcher 选择数据源: tiger / akshare）
   upload   - 上传日K线数据到 Supabase
-
-不指定子命令时，依次执行 download + upload。
 """
 
 from __future__ import annotations
@@ -31,14 +29,25 @@ def _build_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_fetcher_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--fetcher",
+        choices=["tiger", "akshare"],
+        default="tiger",
+        help="数据源 (默认: tiger)",
+    )
+
+
 def register(subparsers) -> None:
     p = subparsers.add_parser("stock-price", help="港股日K线数据 ETL")
     _build_common_args(p)
+    _add_fetcher_arg(p)
 
     sub = p.add_subparsers(dest="stock_price_command")
 
     dl = sub.add_parser("download", help="下载日K线数据")
     _build_common_args(dl)
+    _add_fetcher_arg(dl)
 
     up = sub.add_parser("upload", help="上传日K线数据到 Supabase")
     _build_common_args(up)
@@ -74,23 +83,20 @@ def run(args: argparse.Namespace) -> None:
         _run_download(args, console)
     elif command == "upload":
         _run_upload(args, console)
-    elif command is None:
-        _run_download(args, console)
-        console.print()
-        _run_upload(args, console)
     else:
-        console.print(f"[red]未知子命令: {command}[/red]")
+        console.print("[red]请指定子命令: download 或 upload[/red]")
         sys.exit(1)
 
 
 def _run_download(args, console) -> None:
-    from modules.stock_price.download import StockPriceDownloader
-    from modules.stock_price.tiger_kline import TigerKlineFetcher
+    from modules.stock_price.download import StockPriceDownloader, create_fetcher
 
     tickers = _parse_tickers(args.tickers)
     rights = _resolve_rights(args.right)
+    fetcher_name = getattr(args, "fetcher", "tiger")
 
-    fetcher = TigerKlineFetcher()
+    fetcher = create_fetcher(fetcher_name)
+    console.print(f"数据源: {fetcher_name}")
     dl = StockPriceDownloader(fetcher=fetcher, console=console)
     dl.download(tickers, args.start_date, args.end_date, rights)
 

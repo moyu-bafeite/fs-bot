@@ -1,10 +1,12 @@
 """股价数据下载与增量合并。
 
-从 Tiger API 获取日K线数据，支持检测已有文件的最大日期并只拉取增量部分。
+支持通过 --fetcher 参数动态选择数据源（tiger / akshare），
+检测已有文件的最大日期并只拉取增量部分。
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -16,9 +18,33 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from tigeropen.common.consts import QuoteRight
 
 from lib.db import get_hk_stocks
+from modules.stock_price.akshare_kline import AkshareKlineFetcher
 from modules.stock_price.tiger_kline import TigerKlineFetcher
 
 _DEFAULT_DIR = Path("downloads/stock_price")
+
+_FETCHER_REGISTRY: dict[str, str] = {
+    "tiger": "modules.stock_price.tiger_kline.TigerKlineFetcher",
+    "akshare": "modules.stock_price.akshare_kline.AkshareKlineFetcher",
+}
+
+
+def create_fetcher(name: str) -> Any:
+    """根据名称动态创建 fetcher 实例。
+
+    Args:
+        name: fetcher 名称，支持 "tiger" 或 "akshare"
+
+    Returns:
+        具有 fetch_daily 方法的 fetcher 实例
+    """
+    if name not in _FETCHER_REGISTRY:
+        raise ValueError(
+            f"未知 fetcher: {name!r}，可选: {', '.join(_FETCHER_REGISTRY)}"
+        )
+    module_path, class_name = _FETCHER_REGISTRY[name].rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)()
 
 
 @dataclass(frozen=True)
@@ -39,7 +65,7 @@ class StockPriceDownloader:
 
     用法::
 
-        dl = StockPriceDownloader(fetcher=TigerKlineFetcher())
+        dl = StockPriceDownloader(fetcher=create_fetcher("akshare"))
         results = dl.download(
             tickers=["00700", "09988"],
             start_date=date(2024, 1, 1),
@@ -48,7 +74,7 @@ class StockPriceDownloader:
         )
     """
 
-    fetcher: TigerKlineFetcher
+    fetcher: TigerKlineFetcher | AkshareKlineFetcher
     output_dir: Path = field(default_factory=lambda: _DEFAULT_DIR)
     console: Console = field(default_factory=Console)
 
@@ -79,11 +105,11 @@ class StockPriceDownloader:
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        tasks: list[tuple[str, str, QuoteRight]] = []
+        tasks: list[tuple[str, str]] = []
         for ticker in tickers:
             for right in rights:
-                label = right.value.upper()
-                tasks.append((ticker, label, right))
+                label = right.value.upper() if isinstance(right, QuoteRight) else str(right).upper()
+                tasks.append((ticker, label))
 
         self.console.print(
             f"共 {len(tasks)} 个任务（{len(tickers)} 只股票 × {len(rights)} 种复权）"
@@ -99,9 +125,9 @@ class StockPriceDownloader:
         ) as progress:
             task_id = progress.add_task("下载中", total=len(tasks))
 
-            for ticker, label, right in tasks:
+            for ticker, label in tasks:
                 progress.update(task_id, description=f"{ticker} ({label})")
-                result = self._download_one(ticker, label, right, start_date, end_date)
+                result = self._download_one(ticker, label, start_date, end_date)
                 results.append(result)
                 progress.advance(task_id)
 
@@ -110,13 +136,16 @@ class StockPriceDownloader:
         fail = len(results) - ok
         self.console.print(f"完成: {ok - skip} 新增, {skip} 跳过, {fail} 失败")
 
+        for r in results:
+            if not r.success:
+                self.console.print(f"  [red]✗ {r.stock_code} ({r.right}): {r.error}[/red]")
+
         return results
 
     def _download_one(
         self,
         stock_code: str,
         right_label: str,
-        right: QuoteRight,
         start_date: date,
         end_date: date,
     ) -> DownloadResult:
@@ -143,7 +172,7 @@ class StockPriceDownloader:
 
         try:
             new_records = self.fetcher.fetch_daily(
-                stock_code, effective_start, end_date, right
+                stock_code, effective_start, end_date, right_label
             )
         except Exception as e:
             return DownloadResult(stock_code, right_label, None, 0, False, str(e))
