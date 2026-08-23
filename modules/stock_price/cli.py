@@ -120,6 +120,6 @@ def _run_upload(args, console) -> None:
 
     failed = [r for r in results if not r.success]
     if failed:
-        console.print(f"\n[red]{len(failed)} 个文件上传失败:[/red]")
+        console.print(f"\n[red]{len(failed)} 组上传失败:[/red]")
         for r in failed:
-            console.print(f"  {r.file.name}: {r.error}")
+            console.print(f"  {r.right}: {r.error}")

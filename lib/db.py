@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import os
 import time
+from collections.abc import Callable
 from typing import Any
 
 from supabase import ClientOptions, create_client
@@ -15,26 +16,6 @@ _meta_client = create_client(_url, _key, ClientOptions(schema="meta_data"))
 _md_client = create_client(_url, _key, ClientOptions(schema="market_data"))
 
 HK_STOCKS_TABLE = "sehk_active_stocks"
-
-
-def _retry(max_attempts: int = 3, backoff: float = 1.0):
-    """指数退避重试装饰器，处理网络断连和 Cloudflare 限流。"""
-
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            for attempt in range(max_attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception:
-                    if attempt == max_attempts - 1:
-                        raise
-                    time.sleep(backoff * (2**attempt))
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
 
 
 def _table(name: str):
@@ -141,28 +122,49 @@ def upsert_repurchase_reports(records: list[dict[str, Any]]) -> int:
 # ── 日K线数据操作 ──
 
 
-def upsert_br_daily_prices(records: list[dict[str, Any]]) -> int:
-    """批量 upsert 前复权日K数据。"""
-    if not records:
-        return 0
-    resp = (
-        _md_client.table("hk_br_daily_prices")
-        .upsert(records, on_conflict="stock_code,trade_date")
-        .execute()
-    )
-    return len(resp.data or [])
+def _batch_upsert(
+    table_name: str,
+    records: list[dict[str, Any]],
+    on_conflict: str,
+    page_size: int = 1000,
+    on_page: Callable[[int, int, int], None] | None = None,
+) -> int:
+    """分页批量 upsert，每页最多 page_size 条。
+
+    Args:
+        on_page: 每页上传后的回调，参数为 (当前页序号, 本页条数, 累计条数)
+    """
+    total = 0
+    pages = (len(records) + page_size - 1) // page_size
+    for page_idx in range(pages):
+        i = page_idx * page_size
+        batch = records[i : i + page_size]
+        resp = (
+            _md_client.table(table_name)
+            .upsert(batch, on_conflict=on_conflict)
+            .execute()
+        )
+        count = len(resp.data or [])
+        total += count
+        if on_page:
+            on_page(page_idx + 1, count, total)
+    return total
 
 
-def upsert_nr_daily_prices(records: list[dict[str, Any]]) -> int:
-    """批量 upsert 不复权日K数据。"""
-    if not records:
-        return 0
-    resp = (
-        _md_client.table("hk_nr_daily_prices")
-        .upsert(records, on_conflict="stock_code,trade_date")
-        .execute()
-    )
-    return len(resp.data or [])
+def upsert_br_daily_prices(
+    records: list[dict[str, Any]],
+    on_page: Callable[[int, int, int], None] | None = None,
+) -> int:
+    """分页批量 upsert 前复权日K数据（每页 1000 条）。"""
+    return _batch_upsert("hk_br_daily_prices", records, "stock_code,trade_date", on_page=on_page)
+
+
+def upsert_nr_daily_prices(
+    records: list[dict[str, Any]],
+    on_page: Callable[[int, int, int], None] | None = None,
+) -> int:
+    """分页批量 upsert 不复权日K数据（每页 1000 条）。"""
+    return _batch_upsert("hk_nr_daily_prices", records, "stock_code,trade_date", on_page=on_page)
 
 
 # ── 回购公告链接操作 ──
