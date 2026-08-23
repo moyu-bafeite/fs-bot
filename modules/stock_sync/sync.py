@@ -13,14 +13,14 @@ HKEX_EN_URL = "https://www1.hkexnews.hk/ncms/script/eds/activestock_sehk_e.json"
 HKEX_ZH_URL = "https://www1.hkexnews.hk/ncms/script/eds/activestock_sehk_c.json"
 
 _EXCLUDE_KEYWORDS = re.compile(
-    r"ETF|REIT|FUND|TRUST|BOND|NOTE|TBILL|GILT", re.IGNORECASE
+    r"ETF|FUND|TRUST|BOND|NOTE|TBILL|GILT", re.IGNORECASE
 )
 
 _DERIVATIVE_PATTERN = re.compile(
     r"PRC B\d|W\d{2,4}$|\sN\d{3,4}|\sB\d{3,4}|HSDIV", re.IGNORECASE
 )
 
-_LEVERAGED_INVERSE = re.compile(r"^(FL|XL|FI|XI)\d?", re.IGNORECASE)
+_LEVERAGED_INVERSE = re.compile(r"^(FL|XL|XI)\d?", re.IGNORECASE)
 
 _ETF_PATTERN = re.compile(
     r"^(CSOP|ISHARES|GX |A GX|A CSOP|AMUNDI|PREMIA|INVESCO|HGI |BOCGBA|"

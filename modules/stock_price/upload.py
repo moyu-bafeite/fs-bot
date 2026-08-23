@@ -119,7 +119,7 @@ class StockPriceUploader:
 
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = {
-                    executor.submit(_read_file, file): file for file in files
+                    executor.submit(self._read_file, file): file for file in files
                 }
                 for future in as_completed(futures):
                     result = future.result()
@@ -169,7 +169,7 @@ class StockPriceUploader:
                 def on_page(
                     page: int, _batch: int, cum: int, *, _r=right, _p=pages
                 ) -> None:
-                    self.console.print(f"    {_r} 第 {page}/{_p} 页 ({cum} 条)")
+                    self.console.print(f"    第 {page}/{_p} 页 ({cum} 条)")
 
                 count = upsert_fn(rows, on_page=on_page)
                 results.append(UploadResult(right, files_count, count, True))
@@ -184,32 +184,31 @@ class StockPriceUploader:
 
         return results
 
+    def _read_file(self, file: Path) -> _FileData | _ReadError:
+        """读取并解析单个 JSON 文件。"""
+        try:
+            with open(file, encoding="utf-8") as f:
+                raw = json.load(f)
 
-def _read_file(file: Path) -> _FileData | _ReadError:
-    """读取并解析单个 JSON 文件。"""
-    try:
-        with open(file, encoding="utf-8") as f:
-            raw = json.load(f)
+            right = raw.get("right", "NR").upper()
+            stock_code = raw.get("stock_code", "")
+            records = raw.get("records", [])
 
-        right = raw.get("right", "NR").upper()
-        stock_code = raw.get("stock_code", "")
-        records = raw.get("records", [])
+            rows = [
+                {
+                    "stock_code": stock_code,
+                    "trade_date": rec["trade_date"],
+                    "open": rec["open"],
+                    "high": rec["high"],
+                    "low": rec["low"],
+                    "close": rec["close"],
+                    "volume": rec["volume"],
+                    "turnover": rec["turnover"],
+                }
+                for rec in records
+            ]
 
-        rows = [
-            {
-                "stock_code": stock_code,
-                "trade_date": rec["trade_date"],
-                "open": rec["open"],
-                "high": rec["high"],
-                "low": rec["low"],
-                "close": rec["close"],
-                "volume": rec["volume"],
-                "turnover": rec["turnover"],
-            }
-            for rec in records
-        ]
+            return _FileData(file, right, rows)
 
-        return _FileData(file, right, rows)
-
-    except Exception as e:
-        return _ReadError(file, str(e))
+        except Exception as e:
+            return _ReadError(file, str(e))
