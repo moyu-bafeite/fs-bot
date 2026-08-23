@@ -26,6 +26,7 @@ def register(subparsers) -> None:
 
     ps = sub.add_parser("parse", help="解析未处理的回购公告 PDF")
     ps.add_argument("--workers", type=int, default=5, help="并发线程数")
+    ps.add_argument("--push", action="store_true", help="推送解析结果到 hkex_repurchase_realtime_reports")
 
     p.set_defaults(func=run)
 
@@ -58,6 +59,6 @@ def _run_parse(args: argparse.Namespace) -> None:
     from rich.console import Console
     from modules.srrpt_realtime.parse import parse_all
 
-    results = parse_all(Console(), workers=args.workers)
+    results = parse_all(Console(), workers=args.workers, push=args.push)
     if any(not r.success for r in results):
         sys.exit(1)

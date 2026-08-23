@@ -236,3 +236,42 @@ def mark_announcement_parsed(
         .eq("document_url", document_url)
         .execute()
     )
+
+
+# ── 实时回购报告操作 ──
+
+
+def get_realtime_report_keys(trade_dates: list[str]) -> set[tuple[str, str, int, float]]:
+    """获取指定交易日已有的去重键集合：(stock_code, trade_date, quantity, amount)。"""
+    keys: set[tuple[str, str, int, float]] = set()
+    if not trade_dates:
+        return keys
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _md_client.table("hkex_repurchase_realtime_reports")
+            .select("stock_code,trade_date,quantity,amount")
+            .in_("trade_date", trade_dates)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        for row in rows:
+            keys.add((row["stock_code"], row["trade_date"], int(row["quantity"] or 0), float(row["amount"] or 0)))
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return keys
+
+
+def insert_realtime_reports(records: list[dict[str, Any]]) -> int:
+    """批量插入实时回购报告。"""
+    if not records:
+        return 0
+    resp = (
+        _md_client.table("hkex_repurchase_realtime_reports")
+        .insert(records)
+        .execute()
+    )
+    return len(resp.data or [])

@@ -23,6 +23,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from lib.db import (
     get_unparsed_announcements,
+    insert_realtime_reports,
     mark_announcement_parsed,
 )
 
@@ -226,6 +227,7 @@ def _merge_records(existing: list[dict], new: list[dict]) -> list[dict]:
 def parse_all(
     console: Console | None = None,
     workers: int = 5,
+    push: bool = False,
 ) -> list[ParseResult]:
     """遍历所有未解析公告，多线程下载 PDF → LLM 解析 → 按 trade_date 保存 JSON。"""
     con = console or Console()
@@ -294,6 +296,12 @@ def parse_all(
         out_path.write_text(
             json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+
+    # 推送到 Supabase 实时表
+    if push and date_records:
+        all_records = [r for recs in date_records.values() for r in recs]
+        count = insert_realtime_reports(all_records)
+        con.print(f"[green]✓[/green] 已推送 {count} 条记录到 hkex_repurchase_realtime_reports")
 
     ok = sum(1 for r in results if r.success)
     fail = len(results) - ok
