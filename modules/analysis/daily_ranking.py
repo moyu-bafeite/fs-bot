@@ -58,12 +58,6 @@ class DataFetcher:
         return get_stock_names(stock_codes)
 
 
-def _load_json_file(path: Path) -> list[dict[str, Any]]:
-    """读取单个 JSON 文件，返回记录列表。"""
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
 class DataFetcherLocal:
     """从本地 output/srann/ 目录读取 LLM 解析的回购数据。"""
 
@@ -81,7 +75,7 @@ class DataFetcherLocal:
         records: list[dict[str, Any]] = []
 
         with ThreadPoolExecutor(max_workers=100) as pool:
-            futures = {pool.submit(_load_json_file, f): f for f in files}
+            futures = {pool.submit(DataFetcherLocal._load_json_file, f): f for f in files}
             for future in as_completed(futures):
                 try:
                     rows = future.result()
@@ -97,6 +91,12 @@ class DataFetcherLocal:
     def fetch_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
         """股票名称仍从数据库获取。"""
         return get_stock_names(stock_codes)
+
+    @staticmethod
+    def _load_json_file(path: Path) -> list[dict[str, Any]]:
+        """读取单个 JSON 文件，返回记录列表。"""
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
 
 
 # ── 数据聚合 ──
