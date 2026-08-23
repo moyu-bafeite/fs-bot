@@ -1,6 +1,6 @@
 """股价数据上传器：将本地 JSON 文件上传到 Supabase。
 
-两阶段设计：多线程并行读取文件，按复权类型分组后批量上传。
+流式设计：分批读取文件，按复权类型分桶，桶满即 flush，控制内存峰值。
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ class _ReadError:
 
 @dataclass
 class StockPriceUploader:
-    """股价数据上传器。
+    """股价数据上传器（流式处理，控制内存峰值）。
 
     用法::
 
@@ -64,17 +64,17 @@ class StockPriceUploader:
 
     console: Console = field(default_factory=Console)
     max_workers: int = 8
+    read_batch_size: int = 50
+    flush_threshold: int = 10_000
 
     def upload(
         self,
         files: list[Path],
         dry_run: bool = False,
     ) -> list[UploadResult]:
-        """批量上传 JSON 文件到 Supabase。
+        """流式上传 JSON 文件到 Supabase。
 
-        两阶段执行：
-        1. 多线程并行读取并解析 JSON 文件
-        2. 按复权类型分组，批量上传到 Supabase
+        分批读取文件，按复权类型分桶，桶满即上传，控制内存峰值。
 
         Args:
             files: JSON 文件路径列表
@@ -84,29 +84,18 @@ class StockPriceUploader:
             self.console.print("[yellow]无待上传文件[/yellow]")
             return []
 
-        self.console.print(f"待上传 {len(files)} 个文件")
+        self.console.print(
+            f"待上传 {len(files)} 个文件 "
+            f"(读取批次: {self.read_batch_size}, flush 阈值: {self.flush_threshold})"
+        )
         if dry_run:
             self.console.print("[yellow]DRY RUN 模式[/yellow]")
 
-        # 阶段1: 多线程并行读取
-        file_data_list, read_errors = self._read_all(files)
-
-        for err in read_errors:
-            self.console.print(f"[red]✗ 读取失败[/red] {err.file.name}: {err.error}")
-
-        if not file_data_list:
-            self.console.print("[yellow]无有效数据[/yellow]")
-            return []
-
-        # 阶段2: 按复权类型分组，批量上传
-        return self._upload_grouped(file_data_list, dry_run)
-
-    def _read_all(
-        self, files: list[Path]
-    ) -> tuple[list[_FileData], list[_ReadError]]:
-        """多线程并行读取并解析 JSON 文件。"""
-        ok: list[_FileData] = []
-        errors: list[_ReadError] = []
+        # 按复权类型分桶的累计数据
+        buckets: dict[str, list[dict]] = defaultdict(list)
+        bucket_file_counts: dict[str, int] = defaultdict(int)
+        results: list[UploadResult] = []
+        total_read_errors = 0
 
         with Progress(
             TextColumn("[bold blue]{task.description}"),
@@ -117,72 +106,129 @@ class StockPriceUploader:
         ) as progress:
             task_id = progress.add_task("读取文件", total=len(files))
 
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                futures = {
-                    executor.submit(self._read_file, file): file for file in files
-                }
-                for future in as_completed(futures):
-                    result = future.result()
-                    if isinstance(result, _FileData):
-                        ok.append(result)
-                    else:
-                        errors.append(result)
-                    progress.advance(task_id)
+            # 分批读取
+            for batch_start in range(0, len(files), self.read_batch_size):
+                batch = files[batch_start : batch_start + self.read_batch_size]
+                file_data_list, read_errors = self._read_batch(batch)
 
-        return ok, errors
+                total_read_errors += len(read_errors)
+                for err in read_errors:
+                    self.console.print(
+                        f"[red]✗ 读取失败[/red] {err.file.name}: {err.error}"
+                    )
 
-    def _upload_grouped(
-        self,
-        file_data_list: list[_FileData],
-        dry_run: bool,
-    ) -> list[UploadResult]:
-        """按复权类型分组后批量上传。"""
-        grouped: dict[str, list[dict]] = defaultdict(list)
-        file_counts: dict[str, int] = defaultdict(int)
+                # 累积到桶
+                for fd in file_data_list:
+                    buckets[fd.right].extend(fd.rows)
+                    bucket_file_counts[fd.right] += 1
 
-        for fd in file_data_list:
-            grouped[fd.right].extend(fd.rows)
-            file_counts[fd.right] += 1
+                progress.advance(task_id, advance=len(batch))
 
-        results: list[UploadResult] = []
-
-        for right, rows in grouped.items():
-            files_count = file_counts[right]
-            self.console.print(
-                f"  {right}: {files_count} 个文件, {len(rows)} 条记录"
-            )
-
-            if dry_run:
-                results.append(UploadResult(right, files_count, len(rows), True))
-                continue
-
-            upsert_fn = _UPSERT_MAP.get(right)
-            if not upsert_fn:
-                results.append(
-                    UploadResult(right, files_count, 0, False, f"未知复权类型: {right}")
+                # 检查是否需要 flush
+                flush_results, buckets, bucket_file_counts = self._flush_full_buckets(
+                    buckets, bucket_file_counts, dry_run
                 )
-                continue
+                results.extend(flush_results)
 
-            try:
-                pages = (len(rows) + 999) // 1000
+        # flush 剩余数据
+        flush_results, _, _ = self._flush_all(buckets, bucket_file_counts, dry_run)
+        results.extend(flush_results)
 
-                def on_page(
-                    page: int, _batch: int, cum: int, *, _r=right, _p=pages
-                ) -> None:
-                    self.console.print(f"    第 {page}/{_p} 页 ({cum} 条)")
-
-                count = upsert_fn(rows, on_page=on_page)
-                results.append(UploadResult(right, files_count, count, True))
-                self.console.print(f"[green]✓[/green] {right} 上传完成 ({count} 条)")
-            except Exception as e:
-                results.append(UploadResult(right, files_count, 0, False, str(e)))
-                self.console.print(f"[red]✗[/red] {right} 上传失败: {e}")
+        if total_read_errors:
+            self.console.print(f"[yellow]读取失败: {total_read_errors} 个文件[/yellow]")
 
         total = sum(r.records_count for r in results if r.success)
         fail = sum(1 for r in results if not r.success)
         self.console.print(f"\n完成: {total} 条记录, {fail} 组失败")
 
         return results
+
+    def _read_batch(
+        self, files: list[Path]
+    ) -> tuple[list[_FileData], list[_ReadError]]:
+        """多线程并行读取一批文件。"""
+        ok: list[_FileData] = []
+        errors: list[_ReadError] = []
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {
+                executor.submit(self._read_file, file): file for file in files
+            }
+            for future in as_completed(futures):
+                result = future.result()
+                if isinstance(result, _FileData):
+                    ok.append(result)
+                else:
+                    errors.append(result)
+
+        return ok, errors
+
+    def _flush_full_buckets(
+        self,
+        buckets: dict[str, list[dict]],
+        file_counts: dict[str, int],
+        dry_run: bool,
+    ) -> tuple[list[UploadResult], dict[str, list[dict]], dict[str, int]]:
+        """flush 达到阈值的桶，返回未 flush 的桶。"""
+        results: list[UploadResult] = []
+        remaining: dict[str, list[dict]] = defaultdict(list)
+        remaining_counts: dict[str, int] = defaultdict(int)
+
+        for right, rows in buckets.items():
+            if len(rows) >= self.flush_threshold:
+                result = self._flush_one(right, rows, file_counts[right], dry_run)
+                results.append(result)
+            else:
+                remaining[right] = rows
+                remaining_counts[right] = file_counts[right]
+
+        return results, remaining, remaining_counts
+
+    def _flush_all(
+        self,
+        buckets: dict[str, list[dict]],
+        file_counts: dict[str, int],
+        dry_run: bool,
+    ) -> tuple[list[UploadResult], dict[str, list[dict]], dict[str, int]]:
+        """flush 所有桶。"""
+        results: list[UploadResult] = []
+        for right, rows in buckets.items():
+            if rows:
+                result = self._flush_one(right, rows, file_counts[right], dry_run)
+                results.append(result)
+        return results, {}, defaultdict(int)
+
+    def _flush_one(
+        self, right: str, rows: list[dict], files_count: int, dry_run: bool
+    ) -> UploadResult:
+        """flush 一个桶的数据到 Supabase。"""
+        self.console.print(
+            f"  flush {right}: {files_count} 个文件, {len(rows)} 条记录"
+        )
+
+        if dry_run:
+            return UploadResult(right, files_count, len(rows), True)
+
+        upsert_fn = _UPSERT_MAP.get(right)
+        if not upsert_fn:
+            return UploadResult(
+                right, files_count, 0, False, f"未知复权类型: {right}"
+            )
+
+        try:
+            pages = (len(rows) + 999) // 1000
+
+            def on_page(
+                page: int, _batch: int, cum: int, *, _r=right, _p=pages
+            ) -> None:
+                self.console.print(f"    {_r} 第 {page}/{_p} 页 ({cum} 条)")
+
+            count = upsert_fn(rows, on_page=on_page)
+            self.console.print(f"[green]✓[/green] {right} 上传完成 ({count} 条)")
+            return UploadResult(right, files_count, count, True)
+        except Exception as e:
+            self.console.print(f"[red]✗[/red] {right} 上传失败: {e}")
+            return UploadResult(right, files_count, 0, False, str(e))
 
     def _read_file(self, file: Path) -> _FileData | _ReadError:
         """读取并解析单个 JSON 文件。"""
