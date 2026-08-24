@@ -167,6 +167,23 @@ def upsert_nr_daily_prices(
     return _batch_upsert("hk_nr_daily_prices", records, "stock_code,trade_date", on_page=on_page)
 
 
+def get_nr_daily_turnover(stock_code: str, trade_date: str) -> float | None:
+    """查询指定股票在指定交易日的成交额。"""
+    resp = (
+        _md_client.table("hk_nr_daily_prices")
+        .select("turnover")
+        .eq("stock_code", stock_code)
+        .eq("trade_date", trade_date)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    if not rows:
+        return None
+    turnover = rows[0].get("turnover")
+    return float(turnover) if turnover is not None else None
+
+
 # ── 回购公告链接操作 ──
 
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from lib.db import get_realtime_reports_by_stock, get_unnotified_realtime_reports_by_stock, get_stock_names
+from lib.db import get_nr_daily_turnover, get_realtime_reports_by_stock, get_unnotified_realtime_reports_by_stock, get_stock_names
 
 
 # ── 数据模型 ──
@@ -37,6 +37,7 @@ class CompanyDailyData:
     by_currency: list[CurrencySummary]
     cumulative_quantity: int
     cumulative_pct: float
+    turnover: float | None
     document_urls: list[str]
 
 
@@ -54,6 +55,10 @@ class DataFetcher:
     def fetch_stock_name(stock_code: str) -> dict[str, str]:
         names = get_stock_names([stock_code])
         return names.get(stock_code, {"en": "", "zh-CN": "", "zh-HK": ""})
+
+    @staticmethod
+    def fetch_turnover(stock_code: str, trade_date: date) -> float | None:
+        return get_nr_daily_turnover(stock_code, trade_date.isoformat())
 
 
 # ── 数据聚合 ──
@@ -121,10 +126,10 @@ class Renderer:
 
     def render(self, data: CompanyDailyData) -> str:
         if self._compact:
-            return self._render_compact(data)
-        return self._render_table(data)
+            return self._render_message(data)
+        return self._render_markdown(data)
 
-    def _render_table(self, data: CompanyDailyData) -> str:
+    def _render_markdown(self, data: CompanyDailyData) -> str:
         lines: list[str] = []
         name_display = data.stock_name.get("zh-CN") or data.stock_name.get("en") or ""
         title = f"{data.stock_code} {name_display}".strip()
@@ -162,6 +167,10 @@ class Renderer:
             lines.append(f"| 回购数量 | {qty_display} |")
             lines.append(f"| 回购金额 | {cs.total_amount:,.2f} |")
             lines.append(f"| 价格区间 | {cs.low_price:,.2f} – {cs.high_price:,.2f} |")
+            if cs.currency == "HKD" and data.turnover and data.turnover > 0:
+                ratio = cs.total_amount / data.turnover
+                lines.append(f"| 当日成交额 | {data.turnover:,.2f} |")
+                lines.append(f"| 回购占成交额 | {ratio:.2%} |")
             lines.append("")
 
         # 参考链接
@@ -174,7 +183,7 @@ class Renderer:
 
         return "\n".join(lines)
 
-    def _render_compact(self, data: CompanyDailyData) -> str:
+    def _render_message(self, data: CompanyDailyData) -> str:
         lines: list[str] = []
         name_display = data.stock_name.get("zh-CN") or data.stock_name.get("en") or ""
 
@@ -185,9 +194,9 @@ class Renderer:
         lines.append("")
 
         if data.cumulative_quantity > 0:
-            lines.append(f"本轮累计回购：{data.cumulative_quantity:,} 股")
+            lines.append(f"本轮累计回购：`{data.cumulative_quantity:,}` 股")
         if data.cumulative_pct > 0:
-            lines.append(f"本轮累计占比：{data.cumulative_pct:.4f}%")
+            lines.append(f"本轮累计占比：`{data.cumulative_pct:.4f}%`")
         if data.cumulative_quantity > 0 or data.cumulative_pct > 0:
             lines.append("")
 
@@ -200,9 +209,13 @@ class Renderer:
             qty_display = " ".join(qty_parts)
 
             lines.append(f"**💵 [{cs.currency}]**")
-            lines.append(f"回购数量：{qty_display}")
-            lines.append(f"回购金额：{cs.total_amount:,.2f}")
-            lines.append(f"价格区间：{cs.low_price:,.2f} – {cs.high_price:,.2f}")
+            lines.append(f"回购数量：`{qty_display}`")
+            lines.append(f"回购金额：`{cs.total_amount:,.2f}`")
+            lines.append(f"价格区间：`{cs.low_price:,.3f} – {cs.high_price:,.3f}`")
+            if cs.currency == "HKD" and data.turnover and data.turnover > 0:
+                ratio = cs.total_amount / data.turnover
+                lines.append(f"当日成交额：`{data.turnover:,.2f}`")
+                lines.append(f"回购占成交额：`{ratio:.2%}`")
             lines.append("")
 
         if data.document_urls:
@@ -242,6 +255,7 @@ class SingleCompanyDailySummary:
             return
 
         stock_name = self._fetcher.fetch_stock_name(stock_code)
+        turnover = self._fetcher.fetch_turnover(stock_code, trade_date)
         by_currency, cumulative_quantity, cumulative_pct, document_urls = self._aggregator.aggregate(records)
 
         self._data = CompanyDailyData(
@@ -251,6 +265,7 @@ class SingleCompanyDailySummary:
             by_currency=by_currency,
             cumulative_quantity=cumulative_quantity,
             cumulative_pct=cumulative_pct,
+            turnover=turnover,
             document_urls=document_urls,
         )
 
