@@ -1,7 +1,8 @@
 """数据分析处理器 CLI。
 
 子命令:
-  daily-ranking - 生成每日回购排行榜
+  daily-ranking          - 生成每日回购排行榜
+  single-company-daily-summary - 单公司每日回购摘要
 """
 
 from __future__ import annotations
@@ -24,6 +25,12 @@ def register(subparsers) -> None:
     dr.add_argument("--output", type=str, default=None, help="输出文件路径")
     dr.add_argument("--local", action="store_true", help="从本地 output/srann/ 读取数据")
 
+    sc = sub.add_parser("single-company-daily-summary", help="单公司每日回购摘要")
+    sc.add_argument("--ticker", type=str, required=True, help="股票代码 (如 00700)")
+    sc.add_argument("--date", type=str, default=None, help="交易日期 (YYYY-MM-DD，默认今天)")
+    sc.add_argument("--output", type=str, default=None, help="输出 Markdown 文件路径")
+    sc.add_argument("--dry-run", action="store_true", help="只打印输出内容，不写文件")
+
     p.set_defaults(func=run)
 
 
@@ -31,11 +38,14 @@ def run(args: argparse.Namespace) -> None:
     cmd = getattr(args, "analysis_command", None)
     if cmd == "daily-ranking":
         _run_daily_ranking(args)
+    elif cmd == "single-company-daily-summary":
+        _run_single_company_summary(args)
     else:
         sys.argv = ["analysis", "--help"]
         p = argparse.ArgumentParser(description="数据分析")
         sub = p.add_subparsers(dest="cmd")
         sub.add_parser("daily-ranking")
+        sub.add_parser("single-company-daily-summary")
         p.parse_args(["--help"])
 
 
@@ -74,3 +84,34 @@ def _run_daily_ranking(args: argparse.Namespace) -> None:
             print(f"已写入: {args.output}")
         else:
             print(output)
+
+
+def _run_single_company_summary(args: argparse.Namespace) -> None:
+    from modules.analysis.single_company_daily_summary import SingleCompanyDailySummary
+
+    date_str = args.date or date.today().isoformat()
+    try:
+        trade_date = date.fromisoformat(date_str)
+    except ValueError:
+        print(f"错误：日期格式无效 '{date_str}'，应为 YYYY-MM-DD", file=sys.stderr)
+        sys.exit(1)
+
+    summary = SingleCompanyDailySummary()
+    summary.load(args.ticker, trade_date)
+
+    if not summary.data:
+        print(f"{args.ticker} 在 {trade_date} 无回购数据")
+        return
+
+    md = summary.to_markdown()
+
+    if args.dry_run:
+        print(md)
+        return
+
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(md)
+        print(f"已写入: {args.output}")
+    else:
+        print(md)

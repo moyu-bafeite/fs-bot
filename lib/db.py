@@ -275,3 +275,56 @@ def insert_realtime_reports(records: list[dict[str, Any]]) -> int:
         .execute()
     )
     return len(resp.data or [])
+
+
+def get_realtime_reports_by_stock(
+    stock_code: str, trade_date: str
+) -> list[dict[str, Any]]:
+    """查询指定股票在指定交易日的所有回购记录（可能含多币种）。"""
+    records: list[dict[str, Any]] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _md_client.table("hkex_repurchase_realtime_reports")
+            .select("*")
+            .eq("stock_code", stock_code)
+            .eq("trade_date", trade_date)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            break
+        records.extend(rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return records
+
+
+def get_unnotified_realtime_reports_by_stock(
+    stock_code: str, trade_date: str
+) -> list[dict[str, Any]]:
+    """查询指定股票在指定交易日的所有回购记录（可能含多币种）。"""
+    records: list[dict[str, Any]] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _md_client.table("hkex_repurchase_realtime_reports")
+            .select("*")
+            .eq("stock_code", stock_code)
+            .eq("trade_date", trade_date)
+            .eq("notified", False)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            break
+        records.extend(rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return records
