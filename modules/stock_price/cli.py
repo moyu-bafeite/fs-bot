@@ -40,9 +40,6 @@ def _add_fetcher_arg(parser: argparse.ArgumentParser) -> None:
 
 def register(subparsers) -> None:
     p = subparsers.add_parser("stock-price", help="港股日K线数据 ETL")
-    _build_common_args(p)
-    _add_fetcher_arg(p)
-
     sub = p.add_subparsers(dest="stock_price_command")
 
     dl = sub.add_parser("download", help="下载日K线数据")
@@ -50,7 +47,6 @@ def register(subparsers) -> None:
     _add_fetcher_arg(dl)
 
     up = sub.add_parser("upload", help="上传日K线数据到 Supabase")
-    _build_common_args(up)
     up.add_argument("--input-dir", type=str, default=None, help="JSON 文件目录")
     up.add_argument("--dry-run", action="store_true", help="仅打印，不实际上传")
 
