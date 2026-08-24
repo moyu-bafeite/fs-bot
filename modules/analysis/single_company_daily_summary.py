@@ -180,7 +180,7 @@ class Renderer:
 
         lines.append("#回购摘要")
         lines.append("")
-        lines.append(f"**{name_display.strip()} ({data.stock_code})**")
+        lines.append(f"`{name_display.strip()} ({data.stock_code})`")
         lines.append(f"交易日期：{data.trade_date.isoformat()}")
         lines.append("")
 
