@@ -118,6 +118,17 @@ class DataAggregator:
 # ── Markdown 渲染 ──
 
 
+def _format_amount(value: float) -> str:
+    """将金额格式化为 B/M/K 简写。"""
+    if value >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.2f}B"
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.2f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.2f}K"
+    return f"{value:,.2f}"
+
+
 class Renderer:
     """将 CompanyDailyData 渲染为 Markdown 字符串。"""
 
@@ -132,53 +143,51 @@ class Renderer:
     def _render_markdown(self, data: CompanyDailyData) -> str:
         lines: list[str] = []
         name_display = data.stock_name.get("zh-CN") or data.stock_name.get("en") or ""
-        title = f"{data.stock_code} {name_display}".strip()
 
-        lines.append(f"# {title} — {data.trade_date.isoformat()} 回购摘要")
+        lines.append(f"# {data.stock_code} {name_display} — 回购日度跟踪 ({data.trade_date.isoformat()})")
         lines.append("")
 
-        # 概览
-        lines.append("## 概览")
+        # 核心指标
+        lines.append("## 核心指标")
         lines.append("")
         lines.append("| 指标 | 值 |")
         lines.append("|---|---|")
+
         if data.cumulative_quantity > 0:
-            lines.append(f"| 本轮累计回购 | {data.cumulative_quantity:,} 股 |")
-        if data.cumulative_pct > 0:
-            lines.append(f"| 本轮累计占比 | {data.cumulative_pct:.4f}% |")
+            pct_str = f" ({data.cumulative_pct:.4f}%)" if data.cumulative_pct > 0 else ""
+            lines.append(f"| 本轮累计回购 | {data.cumulative_quantity:,} 股{pct_str} |")
         lines.append("")
 
-        # 分币种明细
-        lines.append("## 分币种明细")
+        # 交易明细
+        lines.append("## 交易明细")
         lines.append("")
+        lines.append("| 币种 | 数量 | 金额 | 价格区间 | 均价 | 成交额占比 |")
+        lines.append("|---|---|---|---|---|---|")
 
         for cs in data.by_currency:
-            lines.append(f"### {cs.currency}")
-            lines.append("")
-            lines.append("| 指标 | 值 |")
-            lines.append("|---|---|")
             qty_parts = [f"{cs.total_quantity:,}"]
             if cs.for_cancellation > 0:
                 qty_parts.append("(C)")
             if cs.for_treasury > 0:
                 qty_parts.append("(T)")
-            qty_display = " ".join(qty_parts)
 
-            lines.append(f"| 回购数量 | {qty_display} |")
-            lines.append(f"| 回购金额 | {cs.total_amount:,.2f} |")
-            lines.append(f"| 价格区间 | {cs.low_price:,.2f} – {cs.high_price:,.2f} |")
+            turnover_str = "—"
             if cs.currency == "HKD" and data.turnover and data.turnover > 0:
                 ratio = cs.total_amount / data.turnover
-                lines.append(f"| 当日成交额 | {data.turnover:,.2f} |")
-                lines.append(f"| 回购占成交额 | {ratio:.2%} |")
-            lines.append("")
+                turnover_str = f"{ratio:.2%}"
 
-        # 参考链接
-        lines.append("## 参考链接")
+            lines.append(
+                f"| {cs.currency} | {' '.join(qty_parts)} | {cs.total_amount:,.2f} | "
+                f"{cs.low_price:,.2f}–{cs.high_price:,.2f} | {cs.avg_price:,.2f} | {turnover_str} |"
+            )
         lines.append("")
+
+        # 来源
         if data.document_urls:
+            lines.append("## 来源")
+            lines.append("")
             for url in data.document_urls:
-                lines.append(f"{url}")
+                lines.append(f"- {url}")
             lines.append("")
 
         return "\n".join(lines)
