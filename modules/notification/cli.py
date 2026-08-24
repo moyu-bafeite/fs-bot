@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -86,8 +87,9 @@ def _run_action(action_name: str) -> None:
         )
 
         action = SingleCompanyDailySummaryAction()
-        pushed = action.execute()
-        if pushed:
-            Console().print("[green]✓[/green] 已推送单公司每日回购摘要")
+        record = action.execute()
+        if record:
+            Console().print(f"[green]✓[/green] 已推送 {record['stock_code']} {record['trade_date']}")
+            Console().print(record)
         else:
             Console().print("[yellow]无未通知的回购数据[/yellow]")

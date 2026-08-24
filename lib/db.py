@@ -342,3 +342,16 @@ def get_latest_unnotified_realtime_report() -> dict[str, Any] | None:
     )
     rows = resp.data or []
     return rows[0] if rows else None
+
+
+def mark_realtime_reports_notified(ids: list[int]) -> int:
+    """将指定 id 的记录标记为已通知。"""
+    if not ids:
+        return 0
+    resp = (
+        _md_client.table("hkex_repurchase_realtime_reports")
+        .update({"notified": True})
+        .in_("id", ids)
+        .execute()
+    )
+    return len(resp.data or [])
