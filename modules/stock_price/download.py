@@ -26,6 +26,7 @@ _DEFAULT_DIR = Path("downloads/stock_price")
 _FETCHER_REGISTRY: dict[str, str] = {
     "tiger": "modules.stock_price.tiger_kline.TigerKlineFetcher",
     "akshare": "modules.stock_price.akshare_kline.AkshareKlineFetcher",
+    "sina": "modules.stock_price.sina_kline.SinaRealtimeFetcher",
 }
 
 

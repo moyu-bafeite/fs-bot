@@ -32,7 +32,7 @@ def _build_common_args(parser: argparse.ArgumentParser) -> None:
 def _add_fetcher_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--fetcher",
-        choices=["tiger", "akshare"],
+        choices=["tiger", "akshare", "sina"],
         default="tiger",
         help="数据源 (默认: tiger)",
     )
