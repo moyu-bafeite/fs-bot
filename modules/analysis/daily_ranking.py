@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import enum
 import io
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,12 +15,24 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
-from lib.db import get_hkex_repurchase_reports, get_stock_names
+from lib.db import (
+    get_repurchase_reports_by_trade_date,
+    get_repurchase_realtime_reports_by_trade_date,
+    get_stock_names,
+)
 
 _LOCAL_DATA_DIR = Path("output/srann")
 
 
 # ── 数据模型 ──
+
+
+class DataSource(enum.Enum):
+    """数据来源枚举。"""
+
+    LOCAL = "local"
+    HKEX_REPORTS = "hkex_repurchase_reports"
+    HKEX_REALTIME = "hkex_repurchase_realtime_reports"
 
 
 @dataclass(frozen=True)
@@ -45,25 +58,27 @@ class RankingItem:
 
 
 class DataFetcher:
-    """封装数据库查询逻辑。"""
+    """封装数据查询逻辑，根据 data_source 选择数据来源。"""
 
-    @staticmethod
-    def fetch(trade_date: date) -> list[dict[str, Any]]:
-        """获取指定交易日的回购报告数据。"""
-        return get_hkex_repurchase_reports(trade_date.isoformat())
+    def __init__(self, data_source: DataSource = DataSource.HKEX_REPORTS) -> None:
+        self._data_source = data_source
+
+    def fetch(self, trade_date: date) -> list[dict[str, Any]]:
+        """获取指定交易日的回购数据。"""
+        if self._data_source == DataSource.HKEX_REPORTS:
+            return get_repurchase_reports_by_trade_date(trade_date.isoformat())
+        if self._data_source == DataSource.HKEX_REALTIME:
+            return get_repurchase_realtime_reports_by_trade_date(trade_date.isoformat())
+        return self._fetch_local(trade_date)
 
     @staticmethod
     def fetch_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
         """批量获取股票名称映射。"""
         return get_stock_names(stock_codes)
 
-
-class DataFetcherLocal:
-    """从本地 output/srann/ 目录读取 LLM 解析的回购数据。"""
-
     @staticmethod
-    def fetch(trade_date: date) -> list[dict[str, Any]]:
-        """并行读取所有 JSON 文件，筛选指定交易日的记录。"""
+    def _fetch_local(trade_date: date) -> list[dict[str, Any]]:
+        """从本地 output/srann/ 目录读取 LLM 解析的回购数据。"""
         if not _LOCAL_DATA_DIR.exists():
             return []
 
@@ -75,7 +90,7 @@ class DataFetcherLocal:
         records: list[dict[str, Any]] = []
 
         with ThreadPoolExecutor(max_workers=100) as pool:
-            futures = {pool.submit(DataFetcherLocal._load_json_file, f): f for f in files}
+            futures = {pool.submit(DataFetcher._load_json_file, f): f for f in files}
             for future in as_completed(futures):
                 try:
                     rows = future.result()
@@ -86,11 +101,6 @@ class DataFetcherLocal:
                     continue
 
         return records
-
-    @staticmethod
-    def fetch_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
-        """股票名称仍从数据库获取。"""
-        return get_stock_names(stock_codes)
 
     @staticmethod
     def _load_json_file(path: Path) -> list[dict[str, Any]]:
@@ -325,7 +335,7 @@ class DailyRanking:
 
     def __init__(
         self,
-        fetcher: DataFetcher | DataFetcherLocal | None = None,
+        fetcher: DataFetcher | None = None,
         aggregator: DataAggregator | None = None,
         renderer: Renderer | None = None,
         exporter: Exporter | None = None,

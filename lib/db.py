@@ -81,7 +81,7 @@ def get_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
     return {row["stock_code"]: row["stock_name"] for row in (resp.data or [])}
 
 
-def get_hkex_repurchase_reports(trade_date: str) -> list[dict[str, Any]]:
+def get_repurchase_reports_by_trade_date(trade_date: str) -> list[dict[str, Any]]:
     """分页查询指定交易日的港交所回购报告。"""
     records: list[dict[str, Any]] = []
     page_size = 1000
@@ -275,6 +275,29 @@ def insert_realtime_reports(records: list[dict[str, Any]]) -> int:
         .execute()
     )
     return len(resp.data or [])
+
+
+def get_repurchase_realtime_reports_by_trade_date(trade_date: str) -> list[dict[str, Any]]:
+    """分页查询指定交易日的实时回购报告。"""
+    records: list[dict[str, Any]] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _md_client.table("hkex_repurchase_realtime_reports")
+            .select("*")
+            .eq("trade_date", trade_date)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            break
+        records.extend(rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return records
 
 
 def get_realtime_reports_by_stock(
