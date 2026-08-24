@@ -180,7 +180,8 @@ class Renderer:
 
         lines.append("#回购摘要")
         lines.append("")
-        lines.append(f"{name_display.strip()} ({data.stock_code}) — {data.trade_date.isoformat()}")
+        lines.append(f"**{name_display.strip()} ({data.stock_code})**")
+        lines.append(f"交易日期：{data.trade_date.isoformat()}")
         lines.append("")
 
         if data.cumulative_quantity > 0:
@@ -198,7 +199,7 @@ class Renderer:
                 qty_parts.append("(T)")
             qty_display = " ".join(qty_parts)
 
-            lines.append(f"**[{cs.currency}]**")
+            lines.append(f"**💵 [{cs.currency}]**")
             lines.append(f"回购数量：{qty_display}")
             lines.append(f"回购金额：{cs.total_amount:,.2f}")
             lines.append(f"价格区间：{cs.low_price:,.2f} – {cs.high_price:,.2f}")
