@@ -116,7 +116,15 @@ class DataAggregator:
 class Renderer:
     """将 CompanyDailyData 渲染为 Markdown 字符串。"""
 
+    def __init__(self, *, compact: bool = False) -> None:
+        self._compact = compact
+
     def render(self, data: CompanyDailyData) -> str:
+        if self._compact:
+            return self._render_compact(data)
+        return self._render_table(data)
+
+    def _render_table(self, data: CompanyDailyData) -> str:
         lines: list[str] = []
         name_display = data.stock_name.get("zh-CN") or data.stock_name.get("en") or ""
         title = f"{data.stock_code} {name_display}".strip()
@@ -162,6 +170,43 @@ class Renderer:
         if data.document_urls:
             for url in data.document_urls:
                 lines.append(f"{url}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def _render_compact(self, data: CompanyDailyData) -> str:
+        lines: list[str] = []
+        name_display = data.stock_name.get("zh-CN") or data.stock_name.get("en") or ""
+
+        lines.append("#回购摘要")
+        lines.append("")
+        lines.append(f"{name_display.strip()} ({data.stock_code}) — {data.trade_date.isoformat()}")
+        lines.append("")
+
+        if data.cumulative_quantity > 0:
+            lines.append(f"本轮累计回购：{data.cumulative_quantity:,} 股")
+        if data.cumulative_pct > 0:
+            lines.append(f"本轮累计占比：{data.cumulative_pct:.4f}%")
+        if data.cumulative_quantity > 0 or data.cumulative_pct > 0:
+            lines.append("")
+
+        for cs in data.by_currency:
+            qty_parts = [f"{cs.total_quantity:,}"]
+            if cs.for_cancellation > 0:
+                qty_parts.append("(C)")
+            if cs.for_treasury > 0:
+                qty_parts.append("(T)")
+            qty_display = " ".join(qty_parts)
+
+            lines.append(f"**[{cs.currency}]**")
+            lines.append(f"回购数量：{qty_display}")
+            lines.append(f"回购金额：{cs.total_amount:,.2f}")
+            lines.append(f"价格区间：{cs.low_price:,.2f} – {cs.high_price:,.2f}")
+            lines.append("")
+
+        if data.document_urls:
+            for url in data.document_urls:
+                lines.append(f"参考链接：{url}")
             lines.append("")
 
         return "\n".join(lines)

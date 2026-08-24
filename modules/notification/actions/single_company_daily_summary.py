@@ -14,6 +14,7 @@ from lib.db import (
 )
 from modules.analysis.single_company_daily_summary import (
     DataFetcher,
+    Renderer,
     SingleCompanyDailySummary,
 )
 from modules.notification.telegram import TelegramNotifier
@@ -45,7 +46,10 @@ class SingleCompanyDailySummaryAction:
         stock_code: str = record["stock_code"]
         trade_date = date.fromisoformat(record["trade_date"])
 
-        summary = SingleCompanyDailySummary(fetcher=NotificationDataFetcher())
+        summary = SingleCompanyDailySummary(
+            fetcher=NotificationDataFetcher(),
+            renderer=Renderer(compact=True),
+        )
         summary.load(stock_code, trade_date)
 
         if not summary.data:
