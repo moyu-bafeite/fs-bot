@@ -339,6 +339,7 @@ def _parse_one(client: OpenAI, ann: dict) -> tuple[ParseResult, list[dict]]:
         # 4. Post Process
         for record in records:
             record["stock_code"] = stock_code
+            record["document_url"] = document_url
 
         # 5. Schema 校验
         errors = _validate_records(records)
