@@ -51,10 +51,6 @@ class DataFetcher:
         return get_realtime_reports_by_stock(stock_code, trade_date.isoformat())
 
     @staticmethod
-    def fetch_unnotified(stock_code: str, trade_date: date) -> list[dict[str, Any]]:
-        return get_unnotified_realtime_reports_by_stock(stock_code, trade_date.isoformat())
-
-    @staticmethod
     def fetch_stock_name(stock_code: str) -> dict[str, str]:
         names = get_stock_names([stock_code])
         return names.get(stock_code, {"en": "", "zh-CN": "", "zh-HK": ""})

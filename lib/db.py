@@ -328,3 +328,17 @@ def get_unnotified_realtime_reports_by_stock(
             break
         offset += page_size
     return records
+
+
+def get_latest_unnotified_realtime_report() -> dict[str, Any] | None:
+    """获取最新一条未通知的实时回购报告。"""
+    resp = (
+        _md_client.table("hkex_repurchase_realtime_reports")
+        .select("*")
+        .eq("notified", False)
+        .order("trade_date", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
