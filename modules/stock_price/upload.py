@@ -9,6 +9,7 @@ import json
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 from rich.console import Console
@@ -70,14 +71,16 @@ class StockPriceUploader:
     def upload(
         self,
         tickers: list[str] | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         dry_run: bool = False,
     ) -> list[UploadResult]:
         """流式上传 JSON 文件到 Supabase。
 
-        分批读取文件，按复权类型分桶，桶满即上传，控制内存峰值。
-
         Args:
             tickers: 股票代码列表，为空或 None 时上传全部
+            start_date: 只上传 trade_date >= start_date 的记录
+            end_date: 只上传 trade_date <= end_date 的记录
             dry_run: 仅打印，不实际上传
         """
         files = self._discover_files(tickers)
@@ -110,7 +113,9 @@ class StockPriceUploader:
             # 分批读取
             for batch_start in range(0, len(files), self.read_batch_size):
                 batch = files[batch_start : batch_start + self.read_batch_size]
-                file_data_list, read_errors = self._read_batch(batch)
+                file_data_list, read_errors = self._read_batch(
+                    batch, start_date, end_date
+                )
 
                 total_read_errors += len(read_errors)
                 for err in read_errors:
@@ -160,7 +165,10 @@ class StockPriceUploader:
         )
 
     def _read_batch(
-        self, files: list[Path]
+        self,
+        files: list[Path],
+        start_date: date | None,
+        end_date: date | None,
     ) -> tuple[list[_FileData], list[_ReadError]]:
         """多线程并行读取一批文件。"""
         ok: list[_FileData] = []
@@ -168,7 +176,10 @@ class StockPriceUploader:
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {
-                executor.submit(self._read_file, file): file for file in files
+                executor.submit(
+                    self._read_file, file, start_date, end_date
+                ): file
+                for file in files
             }
             for future in as_completed(futures):
                 result = future.result()
@@ -246,8 +257,13 @@ class StockPriceUploader:
             self.console.print(f"[red]✗[/red] {right} 上传失败: {e}")
             return UploadResult(right, files_count, 0, False, str(e))
 
-    def _read_file(self, file: Path) -> _FileData | _ReadError:
-        """读取并解析单个 JSON 文件。"""
+    def _read_file(
+        self,
+        file: Path,
+        start_date: date | None,
+        end_date: date | None,
+    ) -> _FileData | _ReadError:
+        """读取并解析单个 JSON 文件，按日期区间过滤记录。"""
         try:
             with open(file, encoding="utf-8") as f:
                 raw = json.load(f)
@@ -255,6 +271,14 @@ class StockPriceUploader:
             right = raw.get("right", "NR").upper()
             stock_code = raw.get("stock_code", "")
             records = raw.get("records", [])
+
+            # 日期区间过滤
+            if start_date:
+                s = start_date.isoformat()
+                records = [r for r in records if r["trade_date"] >= s]
+            if end_date:
+                e = end_date.isoformat()
+                records = [r for r in records if r["trade_date"] <= e]
 
             rows = [
                 {

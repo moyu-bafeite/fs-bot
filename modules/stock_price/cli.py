@@ -45,6 +45,8 @@ def register(subparsers) -> None:
 
     up = sub.add_parser("upload", help="上传日K线数据到 Supabase")
     up.add_argument("--tickers", type=str, default="", help="股票代码，逗号分隔（为空则上传全部）")
+    up.add_argument("--start-date", type=_parse_date, default=date.today(), help="只上传该日期之后的数据（默认今天）")
+    up.add_argument("--end-date", type=_parse_date, default=date.today(), help="只上传该日期之前的数据（默认今天）")
     up.add_argument("--dry-run", action="store_true", help="仅打印，不实际上传")
 
     ck = sub.add_parser("check", help="检查数据质量")
@@ -106,7 +108,10 @@ def _run_upload(args, console) -> None:
 
     uploader = StockPriceUploader(console=console)
     results = uploader.upload(
-        tickers=tickers, dry_run=getattr(args, "dry_run", False)
+        tickers=tickers,
+        start_date=getattr(args, "start_date", None),
+        end_date=getattr(args, "end_date", None),
+        dry_run=getattr(args, "dry_run", False),
     )
 
     failed = [r for r in results if not r.success]
