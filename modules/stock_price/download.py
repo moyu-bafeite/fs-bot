@@ -1,6 +1,6 @@
 """股价数据下载与增量合并。
 
-支持通过 --fetcher 参数动态选择数据源（tiger / akshare），
+支持通过 --fetcher 参数动态选择数据源（tiger / akshare / sina），
 检测已有文件的最大日期并只拉取增量部分。
 """
 
@@ -19,6 +19,7 @@ from tigeropen.common.consts import QuoteRight
 
 from lib.db import get_hk_stocks
 from modules.stock_price.akshare_kline import AkshareKlineFetcher
+from modules.stock_price.sina_kline import SinaRealtimeFetcher
 from modules.stock_price.tiger_kline import TigerKlineFetcher
 
 _DEFAULT_DIR = Path("downloads/stock_price")
@@ -34,7 +35,7 @@ def create_fetcher(name: str) -> Any:
     """根据名称动态创建 fetcher 实例。
 
     Args:
-        name: fetcher 名称，支持 "tiger" 或 "akshare"
+        name: fetcher 名称，支持 tiger|akshare|sina
 
     Returns:
         具有 fetch_daily 方法的 fetcher 实例
@@ -75,7 +76,7 @@ class StockPriceDownloader:
         )
     """
 
-    fetcher: TigerKlineFetcher | AkshareKlineFetcher
+    fetcher: TigerKlineFetcher | AkshareKlineFetcher | SinaRealtimeFetcher
     output_dir: Path = field(default_factory=lambda: _DEFAULT_DIR)
     console: Console = field(default_factory=Console)
 

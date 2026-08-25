@@ -16,7 +16,7 @@ def _parse_date(value: str) -> date:
     return date.fromisoformat(value)
 
 
-def _build_common_args(parser: argparse.ArgumentParser) -> None:
+def _build_download_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--tickers", type=str, default="", help="股票代码，逗号分隔")
     parser.add_argument(
         "--start-date", type=_parse_date, default=date(2015, 1, 1), help="起始日期"
@@ -27,14 +27,11 @@ def _build_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--right", choices=["NR", "BR", "both"], default="both", help="复权方式"
     )
-
-
-def _add_fetcher_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--fetcher",
         choices=["tiger", "akshare", "sina"],
-        default="tiger",
-        help="数据源 (默认: tiger)",
+        default="akshare",
+        help="数据源 (默认: akshare)",
     )
 
 
@@ -43,11 +40,10 @@ def register(subparsers) -> None:
     sub = p.add_subparsers(dest="stock_price_command")
 
     dl = sub.add_parser("download", help="下载日K线数据")
-    _build_common_args(dl)
-    _add_fetcher_arg(dl)
+    _build_download_args(dl)
 
     up = sub.add_parser("upload", help="上传日K线数据到 Supabase")
-    up.add_argument("--input-dir", type=str, default=None, help="JSON 文件目录")
+    up.add_argument("--tickers", type=str, default="", help="股票代码，逗号分隔（为空则上传全部）")
     up.add_argument("--dry-run", action="store_true", help="仅打印，不实际上传")
 
     p.set_defaults(func=run)
@@ -89,7 +85,7 @@ def _run_download(args, console) -> None:
 
     tickers = _parse_tickers(args.tickers)
     rights = _resolve_rights(args.right)
-    fetcher_name = getattr(args, "fetcher", "tiger")
+    fetcher_name = getattr(args, "fetcher", "akshare")
 
     fetcher = create_fetcher(fetcher_name)
     console.print(f"数据源: {fetcher_name}")
@@ -98,21 +94,14 @@ def _run_download(args, console) -> None:
 
 
 def _run_upload(args, console) -> None:
-    from pathlib import Path
+    from modules.stock_price.upload import StockPriceUploader
 
-    from modules.stock_price.upload import DEFAULT_INPUT_DIR, StockPriceUploader
-
-    input_dir = (
-        Path(args.input_dir) if getattr(args, "input_dir", None) else DEFAULT_INPUT_DIR
-    )
-    files = sorted(f for f in input_dir.glob("*.json") if not f.name.startswith("_"))
-
-    if not files:
-        console.print(f"[yellow]未找到 JSON 文件: {input_dir}[/yellow]")
-        return
+    tickers = _parse_tickers(args.tickers)
 
     uploader = StockPriceUploader(console=console)
-    results = uploader.upload(files, dry_run=getattr(args, "dry_run", False))
+    results = uploader.upload(
+        tickers=tickers, dry_run=getattr(args, "dry_run", False)
+    )
 
     failed = [r for r in results if not r.success]
     if failed:

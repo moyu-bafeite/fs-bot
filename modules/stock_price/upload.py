@@ -16,7 +16,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from lib.db import upsert_br_daily_prices, upsert_nr_daily_prices
 
-DEFAULT_INPUT_DIR = Path("downloads/stock_price")
+_INPUT_DIR = Path("downloads/stock_price")
 
 _UPSERT_MAP = {
     "BR": upsert_br_daily_prices,
@@ -59,7 +59,7 @@ class StockPriceUploader:
     用法::
 
         uploader = StockPriceUploader()
-        results = uploader.upload(list(Path("downloads/stock_price").glob("*.json")))
+        results = uploader.upload(tickers=["00700", "09988"])
     """
 
     console: Console = field(default_factory=Console)
@@ -69,7 +69,7 @@ class StockPriceUploader:
 
     def upload(
         self,
-        files: list[Path],
+        tickers: list[str] | None = None,
         dry_run: bool = False,
     ) -> list[UploadResult]:
         """流式上传 JSON 文件到 Supabase。
@@ -77,11 +77,12 @@ class StockPriceUploader:
         分批读取文件，按复权类型分桶，桶满即上传，控制内存峰值。
 
         Args:
-            files: JSON 文件路径列表
+            tickers: 股票代码列表，为空或 None 时上传全部
             dry_run: 仅打印，不实际上传
         """
+        files = self._discover_files(tickers)
         if not files:
-            self.console.print("[yellow]无待上传文件[/yellow]")
+            self.console.print("[yellow]WARNING: 无待上传文件[/yellow]")
             return []
 
         self.console.print(
@@ -142,6 +143,21 @@ class StockPriceUploader:
         self.console.print(f"\n完成: {total} 条记录, {fail} 组失败")
 
         return results
+
+    def _discover_files(self, tickers: list[str] | None) -> list[Path]:
+        """根据 tickers 筛选待上传的 JSON 文件。"""
+        if not _INPUT_DIR.exists():
+            return []
+        if tickers:
+            prefixes = set(tickers)
+            return sorted(
+                f for f in _INPUT_DIR.glob("*.json")
+                if not f.name.startswith("_")
+                and f.stem.split("_")[0] in prefixes
+            )
+        return sorted(
+            f for f in _INPUT_DIR.glob("*.json") if not f.name.startswith("_")
+        )
 
     def _read_batch(
         self, files: list[Path]
