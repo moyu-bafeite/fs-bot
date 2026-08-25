@@ -8,77 +8,38 @@
 
 from __future__ import annotations
 
-import argparse
-from datetime import date
+from datetime import date, datetime
+from typing import Annotated, Literal
+
+import typer
+
+app = typer.Typer(help="港交所回购报告 ETL")
 
 
-def _parse_date(value: str) -> date:
-    return date.fromisoformat(value)
-
-
-def register(subparsers) -> None:
-    p = subparsers.add_parser("srrpt", help="港交所回购报告 ETL")
-    sub = p.add_subparsers(dest="srrpt_command")
-
-    dl = sub.add_parser("download", help="批量下载 SRRPT .xls 文件")
-    dl.add_argument("--start", required=True, type=_parse_date, help="起始日期")
-    dl.add_argument("--end", required=True, type=_parse_date, help="结束日期")
-    dl.add_argument("--output-dir", default=None, help="输出目录")
-    dl.add_argument("--workers", type=int, default=5, help="并发线程数")
-    dl.add_argument("--no-skip", action="store_true", help="不跳过已存在的文件")
-
-    ps = sub.add_parser("parse", help="解析 .xls 为 JSON/CSV")
-    ps.add_argument("file", nargs="?", type=str, default=None, help=".xls 文件路径")
-    ps.add_argument("--json", action="store_true", help="输出 JSON 格式")
-    ps.add_argument("--csv", action="store_true", help="输出 CSV 格式")
-    ps.add_argument("--output", "-o", type=str, default=None, help="输出文件路径")
-    ps.add_argument("--workers", type=int, default=100, help="并发线程数")
-
-    up = sub.add_parser("upload", help="上传 JSON 到 Supabase")
-    up.add_argument("--file", type=str, default=None, help="指定单个 JSON 文件")
-    up.add_argument("--input-dir", type=str, default=None, help="JSON 文件目录")
-    up.add_argument("--workers", type=int, default=100, help="并发线程数")
-    up.add_argument("--dry-run", action="store_true", help="仅打印，不实际插入")
-
-    p.set_defaults(func=run)
-
-
-def run(args: argparse.Namespace) -> None:
-    cmd = getattr(args, "srrpt_command", None)
-    if cmd == "download":
-        _run_download(args)
-    elif cmd == "parse":
-        _run_parse(args)
-    elif cmd == "upload":
-        _run_upload(args)
-    else:
-        import sys
-
-        sys.argv = ["srrpt", "--help"]
-        # Re-parse to show help
-        p = argparse.ArgumentParser(description="港交所回购报告 ETL")
-        sub = p.add_subparsers(dest="cmd")
-        sub.add_parser("download")
-        sub.add_parser("parse")
-        sub.add_parser("upload")
-        p.parse_args(["--help"])
-
-
-def _run_download(args: argparse.Namespace) -> None:
+@app.command()
+def download(
+    start: Annotated[datetime, typer.Option(help="起始日期")] = ...,
+    end: Annotated[datetime, typer.Option(help="结束日期")] = ...,
+    output_dir: Annotated[str, typer.Option(help="输出目录")] = "",
+    workers: Annotated[int, typer.Option(help="并发线程数")] = 5,
+    no_skip: Annotated[bool, typer.Option("--no-skip", help="不跳过已存在的文件")] = False,
+):
+    """批量下载 SRRPT .xls 文件。"""
     from rich.console import Console
+
     from modules.srrpt.download import HKEXSrrptDownloader
 
     console = Console()
     kwargs: dict = {
         "console": console,
-        "workers": args.workers,
-        "skip_existing": not args.no_skip,
+        "workers": workers,
+        "skip_existing": not no_skip,
     }
-    if args.output_dir is not None:
-        kwargs["output_dir"] = args.output_dir
+    if output_dir:
+        kwargs["output_dir"] = output_dir
 
     dl = HKEXSrrptDownloader(**kwargs)
-    results = dl.download_range(args.start, args.end)
+    results = dl.download_range(start.date(), end.date())
 
     failed = [r for r in results if not r.success]
     if failed:
@@ -87,18 +48,26 @@ def _run_download(args: argparse.Namespace) -> None:
             console.print(f"  {r.target_date}: {r.error}")
 
 
-def _run_parse(args: argparse.Namespace) -> None:
+@app.command()
+def parse(
+    file: Annotated[str, typer.Argument(help=".xls 文件路径（为空则批量解析）")] = "",
+    json_format: Annotated[bool, typer.Option("--json", help="输出 JSON 格式")] = False,
+    csv_format: Annotated[bool, typer.Option("--csv", help="输出 CSV 格式")] = False,
+    output: Annotated[str, typer.Option("-o", help="输出文件路径")] = "",
+    workers: Annotated[int, typer.Option(help="并发线程数")] = 100,
+):
+    """解析 .xls 为 JSON/CSV。"""
     from pathlib import Path
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from rich.console import Console
     from modules.srrpt.parse import HKEXSrrptParser
 
     console = Console()
-    fmt = "json" if args.json else "csv"
+    fmt = "json" if json_format else "csv"
 
-    if args.file is None:
+    if not file:
         input_dir = Path("downloads/srrpt")
-        output_dir = Path(args.output) if args.output else Path("output/srrpt")
+        output_dir = Path(output) if output else Path("output/srrpt")
         files = sorted(input_dir.glob("*.xls"))
         if not files:
             console.print(f"[yellow]未找到 .xls 文件: {input_dir}[/yellow]")
@@ -106,31 +75,31 @@ def _run_parse(args: argparse.Namespace) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
         console.print(f"共 {len(files)} 个文件，输出目录: {output_dir}")
 
-        max_workers = min(args.workers, 100)
+        max_workers = min(workers, 100)
         failed_list: list[tuple[Path, str]] = []
 
-        def _process(file: Path):
+        def _process(f: Path):
             try:
-                parser = HKEXSrrptParser(file)
-                parser.load()
-                stem = file.stem
+                p = HKEXSrrptParser(f)
+                p.load()
+                stem = f.stem
                 if fmt == "json":
-                    parser.save_json(output_dir / f"{stem}.json")
+                    p.save_json(output_dir / f"{stem}.json")
                 else:
-                    parser.save_csv(output_dir / f"{stem}.csv")
-                return file, None
+                    p.save_csv(output_dir / f"{stem}.csv")
+                return f, None
             except Exception as e:
-                return file, str(e)
+                return f, str(e)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(_process, f): f for f in files}
             for future in as_completed(futures):
-                file, error = future.result()
+                f, error = future.result()
                 if error:
-                    failed_list.append((file, error))
-                    console.print(f"[red]✗[/red] {file.name}: {error}")
+                    failed_list.append((f, error))
+                    console.print(f"[red]✗[/red] {f.name}: {error}")
                 else:
-                    console.print(f"[green]✓[/green] {file.name}")
+                    console.print(f"[green]✓[/green] {f.name}")
 
         console.print(
             f"\n完成: {len(files) - len(failed_list)} 成功, {len(failed_list)} 失败"
@@ -141,28 +110,35 @@ def _run_parse(args: argparse.Namespace) -> None:
                 console.print(f"  {f.name}: {err}")
         return
 
-    file = Path(args.file)
-    parser = HKEXSrrptParser(file)
+    target = Path(file)
+    parser = HKEXSrrptParser(target)
     parser.load()
 
-    output = Path(args.output) if args.output else None
-    if args.json:
-        if output:
-            parser.save_json(output)
-            console.print(f"[green]已保存 JSON 到 {output}[/green]")
+    out = Path(output) if output else None
+    if json_format:
+        if out:
+            parser.save_json(out)
+            console.print(f"[green]已保存 JSON 到 {out}[/green]")
         else:
             print(parser.to_json())
-    elif args.csv:
-        if output:
-            parser.save_csv(output)
-            console.print(f"[green]已保存 CSV 到 {output}[/green]")
+    elif csv_format:
+        if out:
+            parser.save_csv(out)
+            console.print(f"[green]已保存 CSV 到 {out}[/green]")
         else:
             print(parser.to_csv())
     else:
         parser.print(console)
 
 
-def _run_upload(args: argparse.Namespace) -> None:
+@app.command()
+def upload(
+    file: Annotated[str, typer.Option(help="指定单个 JSON 文件")] = "",
+    input_dir: Annotated[str, typer.Option(help="JSON 文件目录")] = "",
+    workers: Annotated[int, typer.Option(help="并发线程数")] = 100,
+    dry_run: Annotated[bool, typer.Option(help="仅打印，不实际插入")] = False,
+):
+    """上传 JSON 到 Supabase。"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from pathlib import Path
     from rich.console import Console
@@ -173,13 +149,13 @@ def _run_upload(args: argparse.Namespace) -> None:
     console = Console()
     PAGE_SIZE = 1000
 
-    if args.file:
-        files = [Path(args.file)]
+    if file:
+        files = [Path(file)]
         manifest_path = files[0].parent / MANIFEST_NAME
     else:
-        input_dir = Path(args.input_dir) if args.input_dir else Path("output/srrpt")
-        files = sorted(f for f in input_dir.glob("*.json") if f.name != MANIFEST_NAME)
-        manifest_path = input_dir / MANIFEST_NAME
+        in_dir = Path(input_dir) if input_dir else Path("output/srrpt")
+        files = sorted(f for f in in_dir.glob("*.json") if f.name != MANIFEST_NAME)
+        manifest_path = in_dir / MANIFEST_NAME
 
     if not files:
         console.print("[yellow]未找到 JSON 文件[/yellow]")
@@ -196,32 +172,31 @@ def _run_upload(args: argparse.Namespace) -> None:
         return
 
     console.print(f"待上传 {len(pending)} 个文件")
-    if args.dry_run:
+    if dry_run:
         console.print("[yellow]DRY RUN 模式[/yellow]")
 
-    # Phase 1: 并行读取所有文件
     all_rows: list[dict] = []
     failed_reads: list[tuple[Path, str]] = []
     file_row_counts: dict[str, int] = {}
 
-    def _read_file(file: Path):
+    def _read_file(f: Path):
         try:
-            rows = read_json_file(file)
-            return file, rows, None
+            rows = read_json_file(f)
+            return f, rows, None
         except Exception as e:
-            return file, [], str(e)
+            return f, [], str(e)
 
-    with ThreadPoolExecutor(max_workers=min(args.workers, 100)) as executor:
+    with ThreadPoolExecutor(max_workers=min(workers, 100)) as executor:
         futures = {executor.submit(_read_file, f): f for f in pending}
         for future in as_completed(futures):
-            file, rows, error = future.result()
+            f, rows, error = future.result()
             if error:
-                failed_reads.append((file, error))
-                console.print(f"[red]✗[/red] 读取失败 {file.name}: {error}")
+                failed_reads.append((f, error))
+                console.print(f"[red]✗[/red] 读取失败 {f.name}: {error}")
             else:
-                file_row_counts[file.name] = len(rows)
+                file_row_counts[f.name] = len(rows)
                 all_rows.extend(rows)
-                console.print(f"[green]✓[/green] {file.name} ({len(rows)} 条)")
+                console.print(f"[green]✓[/green] {f.name} ({len(rows)} 条)")
 
     if not all_rows:
         console.print("[yellow]无数据可上传[/yellow]")
@@ -229,11 +204,10 @@ def _run_upload(args: argparse.Namespace) -> None:
 
     console.print(f"\n共读取 {len(all_rows)} 条记录")
 
-    if args.dry_run:
+    if dry_run:
         console.print("[yellow]DRY RUN 模式，跳过上传[/yellow]")
         return
 
-    # Phase 2: 分页批量插入
     total_inserted = 0
     failed_inserts: list[str] = []
     pages = (len(all_rows) + PAGE_SIZE - 1) // PAGE_SIZE
@@ -249,7 +223,6 @@ def _run_upload(args: argparse.Namespace) -> None:
             failed_inserts.append(f"第 {page_num} 页: {e}")
             console.print(f"[red]✗[/red] 第 {page_num}/{pages} 页: {e}")
 
-    # 更新 manifest
     if not failed_inserts and not failed_reads:
         manifest.update(file_row_counts)
         manifest.save()

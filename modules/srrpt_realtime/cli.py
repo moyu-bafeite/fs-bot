@@ -7,58 +7,42 @@
 
 from __future__ import annotations
 
-import argparse
-import sys
-from datetime import date
+from datetime import date, datetime
+from typing import Annotated
+
+import typer
+
+app = typer.Typer(help="港交所回购公告实时处理")
 
 
-def _parse_date(value: str) -> date:
-    return date.fromisoformat(value)
-
-
-def register(subparsers) -> None:
-    p = subparsers.add_parser("srrpt-realtime", help="港交所回购公告链接爬虫")
-    sub = p.add_subparsers(dest="srrpt_realtime_command")
-
-    sc = sub.add_parser("scrape", help="爬取回购公告链接")
-    sc.add_argument("--start", type=_parse_date, default=None, help="起始日期（默认今天）")
-    sc.add_argument("--end", type=_parse_date, default=None, help="结束日期（默认同 start）")
-
-    ps = sub.add_parser("parse", help="解析未处理的回购公告 PDF")
-    ps.add_argument("--workers", type=int, default=5, help="并发线程数")
-    ps.add_argument("--push", action="store_true", help="推送解析结果到 hkex_repurchase_realtime_reports")
-
-    p.set_defaults(func=run)
-
-
-def run(args: argparse.Namespace) -> None:
-    cmd = getattr(args, "srrpt_realtime_command", None)
-    if cmd == "scrape":
-        _run_scrape(args)
-    elif cmd == "parse":
-        _run_parse(args)
-    else:
-        from rich.console import Console
-
-        Console().print("[yellow]请指定子命令: scrape 或 parse[/yellow]")
-        sys.exit(1)
-
-
-def _run_scrape(args: argparse.Namespace) -> None:
+@app.command()
+def scrape(
+    start: Annotated[datetime, typer.Option(help="起始日期（默认今天）")] = None,
+    end: Annotated[datetime, typer.Option(help="结束日期（默认同 start）")] = None,
+):
+    """爬取回购公告链接并写入 Supabase"""
     from rich.console import Console
+
     from modules.srrpt_realtime.scrape import scrape_and_save
 
-    start = args.start or date.today()
-    end = args.end or start
-    results = scrape_and_save(start, end, Console())
+    start_date = (start or datetime.now()).date()
+    end_date = (end or datetime.combine(start_date, datetime.min.time())).date()
+
+    results = scrape_and_save(start_date, end_date, Console())
     if any(not r.success for r in results):
-        sys.exit(1)
+        raise typer.Exit(code=1)
 
 
-def _run_parse(args: argparse.Namespace) -> None:
+@app.command()
+def parse(
+    workers: Annotated[int, typer.Option(help="并发线程数")] = 50,
+    push: Annotated[bool, typer.Option(help="推送解析结果到 hkex_repurchase_realtime_reports")] = False,
+):
+    """解析未处理的回购公告 PDF"""
     from rich.console import Console
+
     from modules.srrpt_realtime.parse import parse_all
 
-    results = parse_all(Console(), workers=args.workers, push=args.push)
+    results = parse_all(Console(), workers=workers, push=push)
     if any(not r.success for r in results):
-        sys.exit(1)
+        raise typer.Exit(code=1)

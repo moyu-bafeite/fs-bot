@@ -6,81 +6,60 @@
 
 from __future__ import annotations
 
-import argparse
-import json
 import sys
 from pathlib import Path
+from typing import Annotated, Literal
+
+import typer
 
 _ACTIONS = ["single-company-daily-summary"]
 
-
-def register(subparsers) -> None:
-    p = subparsers.add_parser("notification", help="消息推送")
-    sub = p.add_subparsers(dest="notification_command")
-
-    sd = sub.add_parser("send", help="推送消息到 Telegram")
-    sd.add_argument("--file", type=str, default=None, help="Markdown 文件路径")
-    sd.add_argument(
-        "--action",
-        type=str,
-        choices=_ACTIONS,
-        default=None,
-        help="预定义动作",
-    )
-
-    p.set_defaults(func=run)
+app = typer.Typer(help="消息推送")
 
 
-def run(args: argparse.Namespace) -> None:
-    cmd = getattr(args, "notification_command", None)
-    if cmd == "send":
-        _run_send(args)
-    else:
-        from rich.console import Console
-
-        Console().print("[yellow]请指定子命令: send --file <path> | send --action <name>[/yellow]")
-        sys.exit(1)
-
-
-def _run_send(args: argparse.Namespace) -> None:
+@app.command()
+def send(
+    file: Annotated[str, typer.Option(help="Markdown 文件路径")] = "",
+    action: Annotated[str, typer.Option(help="预定义动作")] = "",
+):
+    """推送消息到 Telegram。"""
     from rich.console import Console
 
-    if args.action and args.file:
-        Console().print("[red]--file 和 --action 不能同时使用[/red]")
-        sys.exit(1)
+    console = Console()
 
-    if not args.action and not args.file:
-        Console().print("[red]请指定 --file 或 --action[/red]")
-        sys.exit(1)
+    if action and file:
+        console.print("[red]--file 和 --action 不能同时使用[/red]")
+        raise typer.Exit(code=1)
 
-    if args.action:
-        _run_action(args.action)
+    if not action and not file:
+        console.print("[red]请指定 --file 或 --action[/red]")
+        raise typer.Exit(code=1)
+
+    if action:
+        _run_action(action, console)
     else:
-        _run_file(args.file)
+        _run_file(file, console)
 
 
-def _run_file(file_path: str) -> None:
-    from rich.console import Console
+def _run_file(file_path: str, console) -> None:
     from modules.notification.telegram import TelegramNotifier
 
     path = Path(file_path)
     if not path.exists():
-        Console().print(f"[red]文件不存在: {path}[/red]")
-        sys.exit(1)
+        console.print(f"[red]文件不存在: {path}[/red]")
+        raise typer.Exit(code=1)
 
     text = path.read_text(encoding="utf-8").strip()
     if not text:
-        Console().print("[yellow]文件内容为空[/yellow]")
+        console.print("[yellow]文件内容为空[/yellow]")
         return
 
     notifier = TelegramNotifier()
     notifier.send(text, markdown=True)
-    Console().print(f"[green]✓[/green] 已推送 {path.name}")
+    console.print(f"[green]✓[/green] 已推送 {path.name}")
 
 
-def _run_action(action_name: str) -> None:
-    from rich.console import Console
-
+def _run_action(action_name: str, console) -> None:
     if action_name == "single-company-daily-summary":
         from modules.notification.actions.single_company_daily_summary import (
             SingleCompanyDailySummaryAction,
@@ -89,7 +68,11 @@ def _run_action(action_name: str) -> None:
         action = SingleCompanyDailySummaryAction()
         record = action.execute()
         if record:
-            Console().print(f"[green]✓[/green] 已推送 {record['stock_code']} {record['trade_date']}")
-            Console().print(record)
+            console.print(f"[green]✓[/green] 已推送 {record['stock_code']} {record['trade_date']}")
+            console.print(record)
         else:
-            Console().print("[yellow]无未通知的回购数据[/yellow]")
+            console.print("[yellow]无未通知的回购数据[/yellow]")
+    else:
+        console.print(f"[red]未知动作: {action_name}[/red]")
+        console.print(f"可用动作: {', '.join(_ACTIONS)}")
+        raise typer.Exit(code=1)

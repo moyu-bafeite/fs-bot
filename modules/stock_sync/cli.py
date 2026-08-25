@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import argparse
+import typer
+
+app = typer.Typer(help="同步 HKEX 活跃股票列表")
 
 
-def register(subparsers) -> None:
-    p = subparsers.add_parser("stock-sync", help="同步 HKEX 活跃股票列表")
-    p.set_defaults(func=run)
+@app.command()
+def sync():
+    """下载 HKEX 活跃股票列表并写入数据库"""
+    from modules.stock_sync.sync import sync as do_sync
 
-
-def run(args: argparse.Namespace) -> None:
-    from modules.stock_sync.sync import sync
-
-    count = sync()
+    count = do_sync()
     print(f"完成，共写入 {count} 条股票记录")

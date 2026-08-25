@@ -1,69 +1,40 @@
-"""统一入口：python app.py <type> [args]
+"""统一入口：python app.py <command> [args]
 
-自动发现 modules/ 下所有注册了 register() 的领域模块。
+自动发现 modules/ 下所有导出 app 对象的领域模块。
+
+环境变量:
+  HK_BOT_ENV  环境标识 (dev/prod)，默认 dev
+              对应加载 .env.{HK_BOT_ENV} 文件
 """
 
 from __future__ import annotations
 
-import argparse
 import importlib
+import os
 import pkgutil
 
+import typer
 from dotenv import load_dotenv
 
 
-def _discover_modules(parser: argparse.ArgumentParser) -> None:
-    """扫描 modules/ 下所有子包，调用 register(subparsers) 注册子命令。"""
+def _discover_modules(app: typer.Typer) -> None:
+    """扫描 modules/ 下所有子包，注册 typer 子命令。"""
     import modules
-
-    subparsers = parser.add_subparsers(dest="type")
 
     for module_info in pkgutil.iter_modules(modules.__path__):
         try:
             cli_mod = importlib.import_module(f"modules.{module_info.name}.cli")
         except ImportError:
             continue
-        if hasattr(cli_mod, "register"):
-            cli_mod.register(subparsers)
 
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="港股数据工具链", add_help=False)
-    parser.add_argument("-h", "--help", action="store_true")
-    parser.add_argument(
-        "--env",
-        choices=["dev", "prod"],
-        default="dev",
-        help="环境（dev=.env.dev, prod=.env.prod）",
-    )
-
-    args, remaining = parser.parse_known_args()
-    load_dotenv(f".env.{args.env}")
-
-    # 构建完整 parser（含子命令）
-    full_parser = argparse.ArgumentParser(description="港股数据工具链")
-    full_parser.add_argument(
-        "--env", choices=["dev", "prod"], default="dev", help="环境"
-    )
-    _discover_modules(full_parser)
-
-    if args.help:
-        if not remaining:
-            full_parser.print_help()
-        else:
-            full_parser.parse_args(remaining + ["--help"])
-        return
-
-    if not remaining:
-        full_parser.print_help()
-        return
-
-    parsed = full_parser.parse_args(remaining)
-    if hasattr(parsed, "func"):
-        parsed.func(parsed)
-    else:
-        full_parser.print_help()
+        if hasattr(cli_mod, "app"):
+            app.add_typer(cli_mod.app, name=module_info.name.replace("_", "-"))
 
 
 if __name__ == "__main__":
-    main()
+    env = os.environ.get("HK_BOT_ENV", "dev")
+    load_dotenv(f".env.{env}")
+
+    app = typer.Typer(help="港股数据工具链", no_args_is_help=True)
+    _discover_modules(app)
+    app()
