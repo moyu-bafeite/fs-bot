@@ -18,6 +18,7 @@ dependencies = [
     "openai>=3.3.1",
     "telegramify-markdown>=1.2.0",
     "python-telegram-bot>=22.8",
+    "typer>=0.27.1",
 ]
 
 [project.optional-dependencies]
