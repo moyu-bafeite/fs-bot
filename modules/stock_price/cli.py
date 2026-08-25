@@ -12,28 +12,12 @@ import argparse
 import sys
 from datetime import date
 
-
-def _parse_date(value: str) -> date:
-    return date.fromisoformat(value)
-
-
-def _build_download_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--tickers", type=str, default="", help="股票代码，逗号分隔")
-    parser.add_argument(
-        "--start-date", type=_parse_date, default=date(2015, 1, 1), help="起始日期"
-    )
-    parser.add_argument(
-        "--end-date", type=_parse_date, default=date.today(), help="结束日期"
-    )
-    parser.add_argument(
-        "--right", choices=["NR", "BR", "both"], default="both", help="复权方式"
-    )
-    parser.add_argument(
-        "--fetcher",
-        choices=["tiger", "akshare", "sina"],
-        default="akshare",
-        help="数据源 (默认: akshare)",
-    )
+from modules.stock_price.utils import (
+    build_download_args,
+    parse_date,
+    parse_tickers,
+    resolve_rights,
+)
 
 
 def register(subparsers) -> None:
@@ -41,34 +25,18 @@ def register(subparsers) -> None:
     sub = p.add_subparsers(dest="stock_price_command")
 
     dl = sub.add_parser("download", help="下载日K线数据")
-    _build_download_args(dl)
+    build_download_args(dl)
 
     up = sub.add_parser("upload", help="上传日K线数据到 Supabase")
     up.add_argument("--tickers", type=str, default="", help="股票代码，逗号分隔（为空则上传全部）")
-    up.add_argument("--start-date", type=_parse_date, default=date.today(), help="只上传该日期之后的数据（默认今天）")
-    up.add_argument("--end-date", type=_parse_date, default=date.today(), help="只上传该日期之前的数据（默认今天）")
+    up.add_argument("--start-date", type=parse_date, default=date.today(), help="只上传该日期之后的数据（默认今天）")
+    up.add_argument("--end-date", type=parse_date, default=date.today(), help="只上传该日期之前的数据（默认今天）")
     up.add_argument("--dry-run", action="store_true", help="仅打印，不实际上传")
 
     ck = sub.add_parser("check", help="检查数据质量")
     ck.add_argument("--file", type=str, default=None, help="指定文件名（如 00837_NR.json），为空则检查全部")
 
     p.set_defaults(func=run)
-
-
-def _resolve_rights(right_arg: str):
-    from tigeropen.common.consts import QuoteRight
-
-    if right_arg == "NR":
-        return [QuoteRight.NR]
-    if right_arg == "BR":
-        return [QuoteRight.BR]
-    return [QuoteRight.NR, QuoteRight.BR]
-
-
-def _parse_tickers(raw: str) -> list[str]:
-    if not raw or not raw.strip():
-        return []
-    return [t.strip() for t in raw.split(",") if t.strip()]
 
 
 def run(args: argparse.Namespace) -> None:
@@ -91,8 +59,8 @@ def run(args: argparse.Namespace) -> None:
 def _run_download(args, console) -> None:
     from modules.stock_price.download import StockPriceDownloader, create_fetcher
 
-    tickers = _parse_tickers(args.tickers)
-    rights = _resolve_rights(args.right)
+    tickers = parse_tickers(args.tickers)
+    rights = resolve_rights(args.right)
     fetcher_name = getattr(args, "fetcher", "akshare")
 
     fetcher = create_fetcher(fetcher_name)
@@ -104,7 +72,7 @@ def _run_download(args, console) -> None:
 def _run_upload(args, console) -> None:
     from modules.stock_price.upload import StockPriceUploader
 
-    tickers = _parse_tickers(args.tickers)
+    tickers = parse_tickers(args.tickers)
 
     uploader = StockPriceUploader(console=console)
     results = uploader.upload(
