@@ -167,7 +167,7 @@ def _post_with_retry(
 # ── 主流程 ──
 
 
-def scrape_date(d: date) -> tuple[list[Announcement], str | None]:
+def _scrape_by_date(d: date) -> tuple[list[Announcement], str | None]:
     """爬取单日回购公告列表，返回 (公告列表, 错误信息或 None)。"""
     payload = {**_PAYLOAD_TEMPLATE, "from": d.strftime("%Y%m%d"), "to": d.strftime("%Y%m%d")}
     try:
@@ -205,7 +205,7 @@ def scrape_and_save(
 
         for d in dates:
             progress.update(task_id, description=f"爬取 {d.isoformat()}")
-            announcements, error = scrape_date(d)
+            announcements, error = _scrape_by_date(d)
 
             if error:
                 results.append(ScrapeResult(d, 0, False, error))
