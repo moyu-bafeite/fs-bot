@@ -32,8 +32,7 @@ def register(subparsers) -> None:
     sc = sub.add_parser("single-company-daily-summary", help="单公司每日回购摘要")
     sc.add_argument("--ticker", type=str, required=True, help="股票代码 (如 00700)")
     sc.add_argument("--date", type=str, default=None, help="交易日期 (YYYY-MM-DD，默认今天)")
-    sc.add_argument("--output", type=str, default=None, help="输出 Markdown 文件路径")
-    sc.add_argument("--dry-run", action="store_true", help="只打印输出内容，不写文件")
+    sc.add_argument("--output", type=str, default=None, help="输出 Markdown 文件路径（不指定则打印到终端）")
 
     p.set_defaults(func=run)
 
@@ -96,10 +95,6 @@ def _run_single_company_summary(args: argparse.Namespace) -> None:
         return
 
     md = summary.to_markdown()
-
-    if args.dry_run:
-        print(md)
-        return
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:

@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from rich.console import Console
+
 from lib.db import (
     get_latest_unnotified_realtime_report,
     get_unnotified_realtime_reports_by_stock,
@@ -27,7 +29,7 @@ class NotificationDataFetcher(DataFetcher):
     def __init__(self, records: list[dict[str, Any]]) -> None:
         self._records = records
 
-    def fetch(self, stock_code: str, trade_date: date) -> list[dict[str, Any]]:
+    def repurchase_reports(self, stock_code: str, trade_date: date) -> list[dict[str, Any]]:
         return self._records
 
 
@@ -55,8 +57,14 @@ class SingleCompanyDailySummaryAction:
 
         ids = [r["id"] for r in records]
 
+        # 检测是否有 trade_date 的股价数据，无则返回 None
+        fetcher = NotificationDataFetcher(records)
+        if (fetcher.turnover(stock_code, trade_date) == None):
+            Console().print(f"[yellow]WARNING: {stock_code} 在 {trade_date} 无最新股价数据[/yellow]")
+            return None
+
         summary = SingleCompanyDailySummary(
-            fetcher=NotificationDataFetcher(records),
+            fetcher=fetcher,
             renderer=Renderer(compact=True),
         )
         summary.load(stock_code, trade_date)

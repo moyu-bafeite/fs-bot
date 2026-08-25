@@ -48,16 +48,16 @@ class DataFetcher:
     """封装数据库查询逻辑。"""
 
     @staticmethod
-    def fetch(stock_code: str, trade_date: date) -> list[dict[str, Any]]:
+    def repurchase_reports(stock_code: str, trade_date: date) -> list[dict[str, Any]]:
         return get_realtime_reports_by_stock(stock_code, trade_date.isoformat())
 
     @staticmethod
-    def fetch_stock_name(stock_code: str) -> dict[str, str]:
+    def stock_name(stock_code: str) -> dict[str, str]:
         names = get_stock_names([stock_code])
         return names.get(stock_code, {"en": "", "zh-CN": "", "zh-HK": ""})
 
     @staticmethod
-    def fetch_turnover(stock_code: str, trade_date: date) -> float | None:
+    def turnover(stock_code: str, trade_date: date) -> float | None:
         return get_nr_daily_turnover(stock_code, trade_date.isoformat())
 
 
@@ -118,17 +118,6 @@ class DataAggregator:
 # ── Markdown 渲染 ──
 
 
-def _format_amount(value: float) -> str:
-    """将金额格式化为 B/M/K 简写。"""
-    if value >= 1_000_000_000:
-        return f"{value / 1_000_000_000:.2f}B"
-    if value >= 1_000_000:
-        return f"{value / 1_000_000:.2f}M"
-    if value >= 1_000:
-        return f"{value / 1_000:.2f}K"
-    return f"{value:,.2f}"
-
-
 class Renderer:
     """将 CompanyDailyData 渲染为 Markdown 字符串。"""
 
@@ -148,14 +137,15 @@ class Renderer:
         lines.append("")
 
         # 核心指标
-        lines.append("## 核心指标")
-        lines.append("")
-        lines.append("| 指标 | 值 |")
-        lines.append("|---|---|")
+        if data.cumulative_quantity > 0:
+            lines.append("## 核心指标")
+            lines.append("")
+            lines.append("| 指标 | 值 |")
+            lines.append("|---|---|")
 
         if data.cumulative_quantity > 0:
-            pct_str = f" ({data.cumulative_pct:.4f}%)" if data.cumulative_pct > 0 else ""
-            lines.append(f"| 本轮累计回购 | {data.cumulative_quantity:,} 股{pct_str} |")
+            pct_str = f"({data.cumulative_pct:.4f}%)" if data.cumulative_pct > 0 else ""
+            lines.append(f"| 本轮累计回购 | {data.cumulative_quantity:,} 股 {pct_str} |")
         lines.append("")
 
         # 交易明细
@@ -258,13 +248,13 @@ class SingleCompanyDailySummary:
 
     def load(self, stock_code: str, trade_date: date) -> None:
         """加载指定股票在指定交易日的回购数据并聚合。"""
-        records = self._fetcher.fetch(stock_code, trade_date)
+        records = self._fetcher.repurchase_reports(stock_code, trade_date)
         if not records:
             self._data = None
             return
 
-        stock_name = self._fetcher.fetch_stock_name(stock_code)
-        turnover = self._fetcher.fetch_turnover(stock_code, trade_date)
+        stock_name = self._fetcher.stock_name(stock_code)
+        turnover = self._fetcher.turnover(stock_code, trade_date)
         by_currency, cumulative_quantity, cumulative_pct, document_urls = self._aggregator.aggregate(records)
 
         self._data = CompanyDailyData(
