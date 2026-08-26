@@ -184,6 +184,30 @@ def get_nr_daily_turnover(stock_code: str, trade_date: str) -> float | None:
     return float(turnover) if turnover is not None else None
 
 
+def get_nr_daily_turnovers(trade_date: str) -> dict[str, float]:
+    """批量查询指定交易日所有股票的成交额，返回 {stock_code: turnover}。"""
+    result: dict[str, float] = {}
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _md_client.table("hk_nr_daily_prices")
+            .select("stock_code,turnover")
+            .eq("trade_date", trade_date)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        for row in rows:
+            turnover = row.get("turnover")
+            if turnover is not None:
+                result[row["stock_code"]] = float(turnover)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return result
+
+
 # ── 回购公告链接操作 ──
 
 

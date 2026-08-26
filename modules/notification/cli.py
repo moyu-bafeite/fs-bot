@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import sys
 from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
 
-_ACTIONS = ["single-company-daily-summary"]
+_ACTIONS = ["single-company-daily-summary", "abnormal-repurchase"]
 
 app = typer.Typer(help="消息推送")
 
@@ -71,7 +72,18 @@ def _run_action(action_name: str, console) -> None:
             console.print(f"[green]✓[/green] 已推送 {record['stock_code']} {record['trade_date']}")
             console.print(record)
         else:
-            console.print("[yellow]无未通知的回购数据[/yellow]")
+            console.print("[yellow]WARNING: 无未通知的回购数据[/yellow]")
+    elif action_name == "abnormal-repurchase":
+        from modules.notification.actions.abnormal_repurchase import (
+            AbnormalRepurchaseAction,
+        )
+
+        action = AbnormalRepurchaseAction()
+        pushed = action.execute()
+        if pushed:
+            console.print(f"[green]✓[/green] 已推送 {datetime.now().date()} 回购异动")
+        else:
+            console.print(f"[yellow]WARNING: {datetime.now().date()} 无回购异动数据[/yellow]")
     else:
         console.print(f"[red]未知动作: {action_name}[/red]")
         console.print(f"可用动作: {', '.join(_ACTIONS)}")
