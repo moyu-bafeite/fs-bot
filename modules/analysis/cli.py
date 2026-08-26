@@ -22,7 +22,7 @@ app = typer.Typer(help="数据分析")
 def daily_ranking(
     date: Annotated[datetime, typer.Option(help="交易日期")] = ...,
     top: Annotated[int, typer.Option(help="只显示前 N 名 (0=全部)")] = 0,
-    format: Annotated[Literal["table", "json", "csv"], typer.Option(help="输出格式")] = "table",
+    print_table: Annotated[bool, typer.Option("--print", help="打印表格")] = False,
     data_source: Annotated[
         Literal["local", "hkex_repurchase_reports", "hkex_repurchase_realtime_reports"],
         typer.Option(help="数据来源"),
@@ -39,41 +39,29 @@ def daily_ranking(
         print(f"{date.date()} 无回购数据")
         return
 
-    if format == "table":
+    if print_table:
         ranking.print(top_n=top)
-    elif format == "json":
-        print(ranking.to_json(top_n=top))
-    elif format == "csv":
-        print(ranking.to_csv(top_n=top))
 
 
 @app.command()
 def single_company_daily_summary(
     ticker: Annotated[str, typer.Option(help="股票代码 (如 00700)")] = ...,
     date: Annotated[datetime, typer.Option(help="交易日期（默认今天）")] = None,
-    output: Annotated[str, typer.Option(help="输出 Markdown 文件路径")] = "",
+    compact: Annotated[bool, typer.Option(help="紧凑模式输出")] = False,
 ):
     """单公司每日回购摘要"""
-    from modules.analysis.single_company_daily_summary import SingleCompanyDailySummary
+    from modules.analysis.single_company_daily_summary import Renderer, SingleCompanyDailySummary
 
     trade_date = (date or datetime.now()).date()
 
-    summary = SingleCompanyDailySummary()
+    summary = SingleCompanyDailySummary(renderer=Renderer(compact=compact))
     summary.load(ticker, trade_date)
 
     if not summary.data:
         print(f"{ticker} 在 {trade_date} 无回购数据")
         return
 
-    md = summary.to_markdown()
-
-    if output:
-        from pathlib import Path
-
-        Path(output).write_text(md, encoding="utf-8")
-        print(f"已写入: {output}")
-    else:
-        print(md)
+    print(summary.to_markdown())
 
 
 @app.command()

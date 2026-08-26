@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import csv
 import enum
-import io
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -255,95 +253,21 @@ class Renderer:
         )
 
 
-# ── 数据导出 ──
-
-
-class Exporter:
-    """负责 json/csv 格式导出。"""
-
-    @staticmethod
-    def to_json(items: list[RankingItem], indent: int = 2) -> str:
-        """导出为 JSON 字符串。"""
-        data = [
-            {
-                "rank": item.rank,
-                "stock_code": item.stock_code,
-                "stock_name": item.stock_name,
-                "currency": item.currency,
-                "total_amount": item.total_amount,
-                "total_quantity": item.total_quantity,
-                "high_price": item.high_price,
-                "low_price": item.low_price,
-                "action_count": item.action_count,
-                "cumulative_quantity": item.cumulative_quantity,
-                "cumulative_pct": item.cumulative_pct,
-                "for_cancellation": item.for_cancellation,
-                "for_treasury": item.for_treasury,
-            }
-            for item in items
-        ]
-        return json.dumps(data, ensure_ascii=False, indent=indent)
-
-    @staticmethod
-    def to_csv(items: list[RankingItem]) -> str:
-        """导出为 CSV 字符串。"""
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(
-            [
-                "rank",
-                "stock_code",
-                "stock_name",
-                "currency",
-                "total_amount",
-                "total_quantity",
-                "high_price",
-                "low_price",
-                "action_count",
-                "cumulative_quantity",
-                "cumulative_pct",
-                "for_cancellation",
-                "for_treasury",
-            ]
-        )
-        for item in items:
-            writer.writerow(
-                [
-                    item.rank,
-                    item.stock_code,
-                    item.stock_name,
-                    item.currency,
-                    item.total_amount,
-                    item.total_quantity,
-                    item.high_price,
-                    item.low_price,
-                    item.action_count,
-                    item.cumulative_quantity,
-                    item.cumulative_pct,
-                    item.for_cancellation,
-                    item.for_treasury,
-                ]
-            )
-        return output.getvalue()
-
-
 # ── 门面类 ──
 
 
 class DailyRanking:
-    """每日回购榜主类，协调数据获取、聚合、展示和导出。"""
+    """每日回购榜主类，协调数据获取、聚合和展示。"""
 
     def __init__(
         self,
         fetcher: DataFetcher | None = None,
         aggregator: DataAggregator | None = None,
         renderer: Renderer | None = None,
-        exporter: Exporter | None = None,
     ) -> None:
         self._fetcher = fetcher or DataFetcher()
         self._aggregator = aggregator or DataAggregator()
         self._renderer = renderer or Renderer()
-        self._exporter = exporter or Exporter()
         self._items: list[RankingItem] = []
         self._trade_date: date | None = None
 
@@ -372,13 +296,3 @@ class DailyRanking:
         if not self._trade_date:
             raise RuntimeError("请先调用 load() 加载数据")
         self._renderer.render(self._trade_date, self._items, top_n)
-
-    def to_json(self, indent: int = 2, top_n: int = 0) -> str:
-        """导出为 JSON 字符串。"""
-        items = self._items[:top_n] if top_n > 0 else self._items
-        return self._exporter.to_json(items, indent)
-
-    def to_csv(self, top_n: int = 0) -> str:
-        """导出为 CSV 字符串。"""
-        items = self._items[:top_n] if top_n > 0 else self._items
-        return self._exporter.to_csv(items)
