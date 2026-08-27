@@ -29,10 +29,11 @@ def daily_ranking(
     ] = "hkex_repurchase_realtime_reports",
 ):
     """生成每日回购排行榜"""
-    from modules.analysis.daily_ranking import DailyRanking, DataFetcher, DataSource
+    from modules.analysis.daily_ranking import DailyRanking, DataFetcher, DataSource, TerminalRenderer
 
     source = DataSource(data_source)
-    ranking = DailyRanking(fetcher=DataFetcher(data_source=source))
+    renderer = TerminalRenderer() if print_table else None
+    ranking = DailyRanking(fetcher=DataFetcher(data_source=source), renderer=renderer)
     ranking.load(date.date())
 
     if not ranking.items:

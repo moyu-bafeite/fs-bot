@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import io
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -184,16 +185,15 @@ class DataAggregator:
 # ── 展示渲染 ──
 
 
-class Renderer:
-    """负责 rich 表格渲染。"""
-
-    def __init__(self, console: Console | None = None) -> None:
-        self._console = console or Console()
+class TerminalRenderer:
+    """负责 rich 终端表格渲染，返回 ANSI 文本。"""
 
     def render(
         self, trade_date: date, items: list[RankingItem], top_n: int = 0
-    ) -> None:
-        """打印回购排行榜，按币种分组。"""
+    ) -> str:
+        """渲染回购排行榜，返回 ANSI 文本。"""
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True)
         display_items = items[:top_n] if top_n > 0 else items
 
         # 按币种分组
@@ -239,18 +239,20 @@ class Renderer:
                     f"{item.cumulative_pct:.4f}%" if item.cumulative_pct > 0 else "—",
                 )
 
-            self._console.print(table)
-            self._console.print()
+            console.print(table)
+            console.print()
 
         unique_companies = len({item.stock_code for item in items})
-        self._console.print(f"共 {unique_companies} 家公司进行回购")
-        self._console.print()
-        self._console.print(
+        console.print(f"共 {unique_companies} 家公司进行回购")
+        console.print()
+        console.print(
             "[dim]* 「本轮累计回购」指最新的股东大会决议案通过后的回购累计数量[/dim]"
         )
-        self._console.print(
+        console.print(
             "[dim]* 「本轮累计占比」指累计回购股份数占最新的股东大会决议案通过当日的已发行股份（不包含库存股）的百分比[/dim]"
         )
+
+        return buf.getvalue()
 
 
 # ── 门面类 ──
@@ -263,11 +265,11 @@ class DailyRanking:
         self,
         fetcher: DataFetcher | None = None,
         aggregator: DataAggregator | None = None,
-        renderer: Renderer | None = None,
+        renderer: TerminalRenderer | None = None,
     ) -> None:
         self._fetcher = fetcher or DataFetcher()
         self._aggregator = aggregator or DataAggregator()
-        self._renderer = renderer or Renderer()
+        self._renderer = renderer
         self._items: list[RankingItem] = []
         self._trade_date: date | None = None
 
@@ -295,4 +297,6 @@ class DailyRanking:
         """打印排行榜到控制台。"""
         if not self._trade_date:
             raise RuntimeError("请先调用 load() 加载数据")
-        self._renderer.render(self._trade_date, self._items, top_n)
+        if not self._renderer:
+            raise RuntimeError("未配置渲染器，请传入 TerminalRenderer")
+        print(self._renderer.render(self._trade_date, self._items, top_n))
