@@ -133,8 +133,8 @@ def parse(
 
 @app.command()
 def upload(
-    file: Annotated[str, typer.Option(help="指定单个 JSON 文件")] = "",
-    input_dir: Annotated[str, typer.Option(help="JSON 文件目录")] = "",
+    start_date: Annotated[datetime, typer.Option(help="起始日期（含）")] = ...,
+    end_date: Annotated[datetime, typer.Option(help="结束日期（含）")] = ...,
     workers: Annotated[int, typer.Option(help="并发线程数")] = 100,
     dry_run: Annotated[bool, typer.Option(help="仅打印，不实际插入")] = False,
 ):
@@ -148,19 +148,29 @@ def upload(
 
     console = Console()
     PAGE_SIZE = 1000
+    in_dir = Path("output/srrpt")
+    manifest_path = in_dir / MANIFEST_NAME
 
-    if file:
-        files = [Path(file)]
-        manifest_path = files[0].parent / MANIFEST_NAME
-    else:
-        in_dir = Path(input_dir) if input_dir else Path("output/srrpt")
-        files = sorted(f for f in in_dir.glob("*.json") if f.name != MANIFEST_NAME)
-        manifest_path = in_dir / MANIFEST_NAME
+    # 1. 扫描目录，按日期筛选文件名
+    def _parse_date(p: Path) -> date | None:
+        stem = p.stem
+        if stem.startswith("SRRPT") and len(stem) == 13:
+            try:
+                return datetime.strptime(stem, "SRRPT%Y%m%d").date()
+            except ValueError:
+                return None
+        return None
+
+    sd, ed = start_date.date(), end_date.date()
+    all_files = sorted(f for f in in_dir.glob("*.json") if f.name != MANIFEST_NAME)
+    files = [f for f in all_files if (d := _parse_date(f)) and sd <= d <= ed]
 
     if not files:
-        console.print("[yellow]未找到 JSON 文件[/yellow]")
+        console.print(f"[yellow]目录 {in_dir} 中未找到 {sd} ~ {ed} 范围内的 JSON 文件[/yellow]")
         return
+    console.print(f"日期范围内共 {len(files)} 个文件")
 
+    # 2. 检查 manifest，跳过已上传
     manifest = Manifest(manifest_path)
     pending = [f for f in files if not manifest.contains(f.name)]
     skipped = [f for f in files if manifest.contains(f.name)]
@@ -175,6 +185,7 @@ def upload(
     if dry_run:
         console.print("[yellow]DRY RUN 模式[/yellow]")
 
+    # 3. 多线程并行读取文件内容
     all_rows: list[dict] = []
     failed_reads: list[tuple[Path, str]] = []
     file_row_counts: dict[str, int] = {}
@@ -201,13 +212,13 @@ def upload(
     if not all_rows:
         console.print("[yellow]无数据可上传[/yellow]")
         return
-
     console.print(f"\n共读取 {len(all_rows)} 条记录")
 
     if dry_run:
         console.print("[yellow]DRY RUN 模式，跳过上传[/yellow]")
         return
 
+    # 4. 串行批量上传
     total_inserted = 0
     failed_inserts: list[str] = []
     pages = (len(all_rows) + PAGE_SIZE - 1) // PAGE_SIZE
@@ -223,6 +234,7 @@ def upload(
             failed_inserts.append(f"第 {page_num} 页: {e}")
             console.print(f"[red]✗[/red] 第 {page_num}/{pages} 页: {e}")
 
+    # 5. 更新 manifest 并汇报结果
     if not failed_inserts and not failed_reads:
         manifest.update(file_row_counts)
         manifest.save()
