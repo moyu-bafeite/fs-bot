@@ -88,6 +88,33 @@ def get_realtime_reports_by_stock(
     return records
 
 
+def get_realtime_reports_by_stock_range(
+    stock_code: str, start_date: str, end_date: str
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _md_client.table("hkex_repurchase_reports")
+            .select("*")
+            .eq("stock_code", stock_code)
+            .gte("trade_date", start_date)
+            .lte("trade_date", end_date)
+            .order("trade_date")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            break
+        records.extend(rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return records
+
+
 def get_unnotified_realtime_reports_by_stock(
     stock_code: str, trade_date: str
 ) -> list[dict[str, Any]]:

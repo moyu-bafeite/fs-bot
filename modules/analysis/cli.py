@@ -1,9 +1,10 @@
 """数据分析处理器 CLI。
 
 子命令:
-  daily-ranking              - 生成每日回购排行榜
+  daily-ranking                - 生成每日回购排行榜
   single-company-daily-summary - 单公司每日回购摘要
-  abnormal-repurchase        - 回购异动
+  single-company-weekly-summary - 单公司周度回购分析
+  abnormal-repurchase          - 回购异动
 """
 
 from __future__ import annotations
@@ -85,3 +86,22 @@ def abnormal_repurchase(
         return
 
     print(ar.to_markdown(limit=limit))
+
+
+@app.command()
+def single_company_weekly_summary(
+    ticker: Annotated[str, typer.Option(help="股票代码 (如 00700)")] = ...,
+    weekend: Annotated[datetime, typer.Option(help="周末日期（默认最近一个交易日）")] = None,
+):
+    """单公司周度回购分析"""
+    from modules.analysis.single_company_weekly_summary import WeeklySummary
+
+    end = (weekend or datetime.now()).date()
+    summary = WeeklySummary(ticker, end)
+    summary.load()
+
+    if not summary.report:
+        print(f"{ticker} 在 {end} 前一周无回购数据")
+        return
+
+    print(summary.to_markdown())

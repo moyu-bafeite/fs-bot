@@ -62,6 +62,33 @@ def get_nr_daily_turnover(stock_code: str, trade_date: str) -> float | None:
     return float(turnover) if turnover is not None else None
 
 
+def get_daily_prices_by_range(
+    table_name: str, stock_code: str, start_date: str, end_date: str
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = (
+            _md_client.table(table_name)
+            .select("*")
+            .eq("stock_code", stock_code)
+            .gte("trade_date", start_date)
+            .lte("trade_date", end_date)
+            .order("trade_date")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        rows = resp.data or []
+        if not rows:
+            break
+        records.extend(rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return records
+
+
 def get_nr_daily_turnovers(trade_date: str) -> dict[str, float]:
     result: dict[str, float] = {}
     page_size = 1000
