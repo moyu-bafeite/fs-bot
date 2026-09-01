@@ -106,7 +106,7 @@ class HKEXSrrptDownloader:
                 pending.append((d, url, path))
 
         if skipped:
-            self._console.print(f"跳过 {len(skipped)} 个已存在的文件")
+            self._console.print(f"[yellow]WARNING: 跳过 {len(skipped)} 个已存在的文件[/yellow]")
 
         if not pending:
             return skipped

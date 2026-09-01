@@ -18,9 +18,8 @@ app = typer.Typer(help="港交所回购报告 ETL")
 
 @app.command()
 def download(
-    start: Annotated[datetime, typer.Option(help="起始日期")] = ...,
-    end: Annotated[datetime, typer.Option(help="结束日期")] = ...,
-    output_dir: Annotated[str, typer.Option(help="输出目录")] = "",
+    start_date: Annotated[datetime, typer.Option(help="起始日期")] = datetime.now(),
+    end_date: Annotated[datetime, typer.Option(help="结束日期")] = datetime.now(),
     workers: Annotated[int, typer.Option(help="并发线程数")] = 5,
     no_skip: Annotated[bool, typer.Option("--no-skip", help="不跳过已存在的文件")] = False,
 ):
@@ -29,17 +28,17 @@ def download(
 
     from modules.srrpt.download import HKEXSrrptDownloader
 
-    console = Console()
-    kwargs: dict = {
-        "console": console,
-        "workers": workers,
-        "skip_existing": not no_skip,
-    }
-    if output_dir:
-        kwargs["output_dir"] = output_dir
+    today = date.today()
+    sd = start_date.date() or today
+    ed = end_date.date() or today
 
-    dl = HKEXSrrptDownloader(**kwargs)
-    results = dl.download_range(start.date(), end.date())
+    console = Console()
+    dl = HKEXSrrptDownloader(
+        console=console,
+        workers=workers,
+        skip_existing=not no_skip,
+    )
+    results = dl.download_range(sd, ed)
 
     failed = [r for r in results if not r.success]
     if failed:
@@ -51,9 +50,7 @@ def download(
 @app.command()
 def parse(
     file: Annotated[str, typer.Argument(help=".xls 文件路径（为空则批量解析）")] = "",
-    json_format: Annotated[bool, typer.Option("--json", help="输出 JSON 格式")] = False,
-    csv_format: Annotated[bool, typer.Option("--csv", help="输出 CSV 格式")] = False,
-    output: Annotated[str, typer.Option("-o", help="输出文件路径")] = "",
+    format: Annotated[Literal["json", "csv"], typer.Option("--format", help="输出格式")] = "json",
     workers: Annotated[int, typer.Option(help="并发线程数")] = 100,
 ):
     """解析 .xls 为 JSON/CSV。"""
@@ -63,11 +60,10 @@ def parse(
     from modules.srrpt.parse import HKEXSrrptParser
 
     console = Console()
-    fmt = "json" if json_format else "csv"
 
     if not file:
         input_dir = Path("downloads/srrpt")
-        output_dir = Path(output) if output else Path("output/srrpt")
+        output_dir = Path("output/srrpt")
         files = sorted(input_dir.glob("*.xls"))
         if not files:
             console.print(f"[yellow]未找到 .xls 文件: {input_dir}[/yellow]")
@@ -83,7 +79,7 @@ def parse(
                 p = HKEXSrrptParser(f)
                 p.load()
                 stem = f.stem
-                if fmt == "json":
+                if format == "json":
                     p.save_json(output_dir / f"{stem}.json")
                 else:
                     p.save_csv(output_dir / f"{stem}.csv")
@@ -114,29 +110,17 @@ def parse(
     parser = HKEXSrrptParser(target)
     parser.load()
 
-    out = Path(output) if output else None
-    if json_format:
-        if out:
-            parser.save_json(out)
-            console.print(f"[green]已保存 JSON 到 {out}[/green]")
-        else:
-            print(parser.to_json())
-    elif csv_format:
-        if out:
-            parser.save_csv(out)
-            console.print(f"[green]已保存 CSV 到 {out}[/green]")
-        else:
-            print(parser.to_csv())
+    if format == "json":
+        print(parser.to_json())
     else:
-        parser.print(console)
+        print(parser.to_csv())
 
 
 @app.command()
 def upload(
-    start_date: Annotated[datetime, typer.Option(help="起始日期（含）")] = ...,
-    end_date: Annotated[datetime, typer.Option(help="结束日期（含）")] = ...,
+    start_date: Annotated[datetime, typer.Option(help="起始日期（含）")] = datetime.now(),
+    end_date: Annotated[datetime, typer.Option(help="结束日期（含）")] = datetime.now(),
     workers: Annotated[int, typer.Option(help="并发线程数")] = 100,
-    dry_run: Annotated[bool, typer.Option(help="仅打印，不实际插入")] = False,
 ):
     """上传 JSON 到 Supabase。"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -145,6 +129,10 @@ def upload(
     from lib.manifest import MANIFEST_NAME, Manifest
     from lib.db import upsert_repurchase_reports
     from modules.srrpt.upload import read_json_file
+
+    today = date.today()
+    sd = start_date or today
+    ed = end_date or today
 
     console = Console()
     PAGE_SIZE = 1000
@@ -161,7 +149,6 @@ def upload(
                 return None
         return None
 
-    sd, ed = start_date.date(), end_date.date()
     all_files = sorted(f for f in in_dir.glob("*.json") if f.name != MANIFEST_NAME)
     files = [f for f in all_files if (d := _parse_date(f)) and sd <= d <= ed]
 
@@ -182,8 +169,6 @@ def upload(
         return
 
     console.print(f"待上传 {len(pending)} 个文件")
-    if dry_run:
-        console.print("[yellow]DRY RUN 模式[/yellow]")
 
     # 3. 多线程并行读取文件内容
     all_rows: list[dict] = []
@@ -213,10 +198,6 @@ def upload(
         console.print("[yellow]无数据可上传[/yellow]")
         return
     console.print(f"\n共读取 {len(all_rows)} 条记录")
-
-    if dry_run:
-        console.print("[yellow]DRY RUN 模式，跳过上传[/yellow]")
-        return
 
     # 4. 串行批量上传
     total_inserted = 0
