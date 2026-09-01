@@ -16,8 +16,6 @@ from typing import Annotated, Literal
 from rich.console import Console
 import typer
 
-from modules.analysis.abnormal_repurchase import Renderer
-
 app = typer.Typer(help="数据分析")
 
 
@@ -78,21 +76,27 @@ def abnormal_repurchase(
     date: Annotated[datetime, typer.Option(help="交易日期（默认今天）")] = None,
     threshold: Annotated[float, typer.Option(help="占比阈值（百分比）")] = 10.0,
     limit: Annotated[int, typer.Option(help="展示条数（0=全部）")] = 100,
-    compact: Annotated[bool, typer.Option(help="是否展示紧凑文本")] = False
+    output: Annotated[Path, typer.Option("--output", "-o", help="输出 SVG 图片路径")] = None,
 ):
     """回购异动：按回购额占成交额占比降序排序"""
-    from modules.analysis.abnormal_repurchase import AbnormalRepurchase
+    from modules.analysis.abnormal_repurchase import AbnormalRepurchase, TerminalRenderer
 
     trade_date = (date or datetime.now()).date()
+    renderer = TerminalRenderer()
 
-    ar = AbnormalRepurchase(renderer=Renderer(compact=compact))
+    ar = AbnormalRepurchase()
     ar.load(trade_date, threshold=threshold)
 
     if not ar.items:
-        print(f"{trade_date} 无符合条件的回购异动数据")
+        Console().print(f"[yellow]WARNING: {trade_date} 无符合条件的回购异动数据[/yellow]")
         return
 
-    print(ar.to_markdown(limit=limit))
+    if output:
+        svg = renderer.render_svg(trade_date, ar.items, limit=limit)
+        output.write_text(svg, encoding="utf-8")
+        Console().print(f"[green]SVG 已保存到 {output}[/green]")
+    else:
+        print(renderer.render(trade_date, ar.items, limit=limit))
 
 
 @app.command()

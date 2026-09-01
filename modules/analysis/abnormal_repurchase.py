@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
+
+from rich.console import Console
+from rich.table import Table
 
 from lib.db import (
     get_nr_daily_turnovers,
@@ -224,6 +228,93 @@ class Renderer:
         lines.append("累计：本轮授权以来的累计回购占比")
 
         return "\n".join(lines)
+
+
+# ── 终端渲染 ──
+
+
+class TerminalRenderer:
+    """负责 rich 终端表格渲染。"""
+
+    def render(
+        self, trade_date: date, items: list[AbnormalItem], limit: int
+    ) -> str:
+        """渲染回购异动表，返回 ANSI 文本。"""
+        console = self._build_console(trade_date, items, limit)
+        return console.file.getvalue()  # type: ignore[union-attr]
+
+    def render_svg(
+        self, trade_date: date, items: list[AbnormalItem], limit: int
+    ) -> str:
+        """渲染回购异动表，返回 SVG 字符串。"""
+        console = self._build_console(trade_date, items, limit)
+        return console.export_svg(title=f"回购异动 {trade_date.isoformat()}")
+
+    @staticmethod
+    def _build_console(
+        trade_date: date, items: list[AbnormalItem], limit: int
+    ) -> Console:
+        buf = io.StringIO()
+        console = Console(file=buf, force_terminal=True, record=True)
+        display_items = items[:limit] if limit > 0 else items
+
+        table = Table(
+            title=f"📊 回购异动  {trade_date.isoformat()}",
+            title_style="bold white",
+            show_header=True,
+            header_style="bold bright_cyan",
+            border_style="bright_black",
+            row_styles=[""],
+            pad_edge=False,
+            padding=(0, 1),
+            expand=True,
+        )
+        table.add_column("#", justify="right", style="dim", min_width=3, no_wrap=True)
+        table.add_column("股票", min_width=16)
+        table.add_column("回购额", justify="right", style="bold", min_width=10)
+        table.add_column("成交额", justify="right", min_width=10)
+        table.add_column("占比", justify="right", min_width=8)
+        table.add_column("价格位置", justify="right", min_width=8)
+        table.add_column("注销率", justify="right", min_width=6)
+        table.add_column("累计进度", justify="right", min_width=8)
+
+        for item in display_items:
+            name = item.stock_name.get("zh-CN") or item.stock_name.get("en") or ""
+
+            ratio_display = f"[bold]{item.ratio:.2%}[/bold]"
+            if item.ratio >= 0.5:
+                ratio_display = f"[bold green]{item.ratio:.2%}[/bold green]"
+            elif item.ratio >= 0.00:
+                ratio_display = f"[bold yellow]{item.ratio:.2%}[/bold yellow]"
+
+            table.add_row(
+                str(item.rank),
+                f"{item.stock_code} {name}",
+                _format_amount(item.repurchase_amount),
+                _format_amount(item.turnover),
+                ratio_display,
+                f"{item.price_position:.2f}",
+                f"{item.cancellation_rate:.0%}"
+                if item.cancellation_rate > 0
+                else "[dim]—[/dim]",
+                f"{item.cumulative_pct:.4f}%"
+                if item.cumulative_pct > 0
+                else "[dim]—[/dim]",
+            )
+
+        console.print(table)
+        console.print()
+        console.print(
+            "[dim]  * 价格位置：回购均价在当日价格区间中的位置（0=最低，1=最高）[/dim]"
+        )
+        console.print(
+            "[dim]  * 注销率：用于注销的回购数量占当日总回购数量的比例[/dim]"
+        )
+        console.print(
+            "[dim]  * 累计进度：本轮授权以来的累计回购占比[/dim]"
+        )
+
+        return console
 
 
 # ── 门面类 ──
