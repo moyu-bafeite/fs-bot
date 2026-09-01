@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from pathlib import Path
 from typing import Annotated, Literal
 
+from rich.console import Console
 import typer
 
 from modules.analysis.abnormal_repurchase import Renderer
@@ -21,9 +23,9 @@ app = typer.Typer(help="数据分析")
 
 @app.command()
 def daily_ranking(
-    date: Annotated[datetime, typer.Option(help="交易日期")] = ...,
+    date: Annotated[datetime, typer.Option(help="交易日期（默认今天）")] = None,
     top: Annotated[int, typer.Option(help="只显示前 N 名 (0=全部)")] = 0,
-    print_table: Annotated[bool, typer.Option("--print", help="打印表格")] = False,
+    output: Annotated[Path, typer.Option("--output", "-o", help="输出 SVG 图片路径")] = None,
     data_source: Annotated[
         Literal["local", "hkex_repurchase_reports", "hkex_repurchase_realtime_reports"],
         typer.Option(help="数据来源"),
@@ -32,17 +34,22 @@ def daily_ranking(
     """生成每日回购排行榜"""
     from modules.analysis.daily_ranking import DailyRanking, DataFetcher, DataSource, TerminalRenderer
 
+    trade_date = (date or datetime.now()).date()
     source = DataSource(data_source)
-    renderer = TerminalRenderer() if print_table else None
-    ranking = DailyRanking(fetcher=DataFetcher(data_source=source), renderer=renderer)
-    ranking.load(date.date())
+    renderer = TerminalRenderer()
+    ranking = DailyRanking(fetcher=DataFetcher(data_source=source))
+    ranking.load(trade_date)
 
     if not ranking.items:
-        print(f"{date.date()} 无回购数据")
+        Console().print(f"[yellow]WARNING: {trade_date} 无回购数据[/yellow]")
         return
 
-    if print_table:
-        ranking.print(top_n=top)
+    if output:
+        svg = renderer.render_svg(trade_date, ranking.items, top_n=top)
+        output.write_text(svg, encoding="utf-8")
+        Console().print(f"[green]SVG 已保存到 {output}[/green]")
+    else:
+        print(renderer.render(trade_date, ranking.items, top_n=top))
 
 
 @app.command()

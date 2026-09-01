@@ -112,6 +112,30 @@ def get_nr_daily_turnovers(trade_date: str) -> dict[str, float]:
     return result
 
 
+def get_nr_close_prices(
+    trade_date: str, stock_codes: list[str]
+) -> dict[str, float]:
+    """批量获取指定交易日的不复权收盘价。"""
+    if not stock_codes:
+        return {}
+    result: dict[str, float] = {}
+    page_size = 1000
+    for i in range(0, len(stock_codes), page_size):
+        batch = stock_codes[i : i + page_size]
+        resp = (
+            _md_client.table("hk_nr_daily_prices")
+            .select("stock_code,close")
+            .eq("trade_date", trade_date)
+            .in_("stock_code", batch)
+            .execute()
+        )
+        for row in (resp.data or []):
+            close = row.get("close")
+            if close is not None:
+                result[row["stock_code"]] = float(close)
+    return result
+
+
 def get_max_trade_dates(
     table_name: str, stock_codes: list[str], max_workers: int = 8
 ) -> dict[str, str]:

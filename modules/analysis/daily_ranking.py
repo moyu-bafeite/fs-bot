@@ -7,7 +7,7 @@ import io
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 
 from lib.db import (
+    get_nr_close_prices,
     get_repurchase_reports_by_trade_date,
     get_repurchase_realtime_reports_by_trade_date,
     get_stock_names,
@@ -51,6 +52,7 @@ class RankingItem:
     cumulative_pct: float
     for_cancellation: int
     for_treasury: int
+    change_pct: float | None = None
 
 
 # ── 数据获取 ──
@@ -74,6 +76,40 @@ class DataFetcher:
     def fetch_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
         """批量获取股票名称映射。"""
         return get_stock_names(stock_codes)
+
+    @staticmethod
+    def fetch_price_changes(
+        trade_date: date, stock_codes: list[str]
+    ) -> dict[str, float | None]:
+        """获取当日涨跌幅（百分比）。返回 {stock_code: change_pct}。"""
+        if not stock_codes:
+            return {}
+
+        date_str = trade_date.isoformat()
+        today_closes = get_nr_close_prices(date_str, stock_codes)
+        if not today_closes:
+            return {code: None for code in stock_codes}
+
+        # 查找前一个交易日的收盘价
+        prev_codes = [code for code in stock_codes if code in today_closes]
+        prev_closes: dict[str, float] = {}
+
+        # 逐日前推，最多回退 7 天以覆盖长假
+        for delta in range(1, 8):
+            prev_date = (trade_date - timedelta(days=delta)).isoformat()
+            prev_closes = get_nr_close_prices(prev_date, prev_codes)
+            if prev_closes:
+                break
+
+        result: dict[str, float | None] = {}
+        for code in stock_codes:
+            today = today_closes.get(code)
+            prev = prev_closes.get(code)
+            if today is not None and prev is not None and prev > 0:
+                result[code] = (today - prev) / prev * 100
+            else:
+                result[code] = None
+        return result
 
     @staticmethod
     def _fetch_local(trade_date: date) -> list[dict[str, Any]]:
@@ -116,9 +152,13 @@ class DataAggregator:
 
     @staticmethod
     def aggregate(
-        records: list[dict[str, Any]], stock_names: dict[str, dict[str, str]]
+        records: list[dict[str, Any]],
+        stock_names: dict[str, dict[str, str]],
+        price_changes: dict[str, float | None] | None = None,
     ) -> list[RankingItem]:
         """按股票代码+币种聚合回购数据，按总金额降序排序。"""
+        if price_changes is None:
+            price_changes = {}
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for record in records:
             code = record["stock_code"]
@@ -158,6 +198,7 @@ class DataAggregator:
                     cumulative_pct=cumulative_pct,
                     for_cancellation=for_cancellation,
                     for_treasury=for_treasury,
+                    change_pct=price_changes.get(code),
                 )
             )
 
@@ -177,6 +218,7 @@ class DataAggregator:
                 cumulative_pct=item.cumulative_pct,
                 for_cancellation=item.for_cancellation,
                 for_treasury=item.for_treasury,
+                change_pct=item.change_pct,
             )
             for i, item in enumerate(items)
         ]
@@ -186,17 +228,31 @@ class DataAggregator:
 
 
 class TerminalRenderer:
-    """负责 rich 终端表格渲染，返回 ANSI 文本。"""
+    """负责 rich 终端表格渲染，返回 ANSI 文本或 SVG。"""
 
     def render(
         self, trade_date: date, items: list[RankingItem], top_n: int = 0
     ) -> str:
         """渲染回购排行榜，返回 ANSI 文本。"""
+        console, _ = self._build_console(trade_date, items, top_n)
+        return console.file.getvalue()  # type: ignore[union-attr]
+
+    def render_svg(
+        self, trade_date: date, items: list[RankingItem], top_n: int = 0
+    ) -> str:
+        """渲染回购排行榜，返回 SVG 字符串。"""
+        console, _ = self._build_console(trade_date, items, top_n)
+        return console.export_svg(title=f"港股回购榜 {trade_date.isoformat()}")
+
+    @staticmethod
+    def _build_console(
+        trade_date: date, items: list[RankingItem], top_n: int = 0
+    ) -> tuple[Console, int]:
+        """构建 Console 并写入表格，返回 (console, 公司数)。"""
         buf = io.StringIO()
-        console = Console(file=buf, force_terminal=True)
+        console = Console(file=buf, force_terminal=True, record=True)
         display_items = items[:top_n] if top_n > 0 else items
 
-        # 按币种分组
         currencies = list(dict.fromkeys(item.currency for item in display_items))
 
         for currency in currencies:
@@ -205,18 +261,23 @@ class TerminalRenderer:
                 continue
 
             table = Table(
-                title=f"港股回购榜 {trade_date.isoformat()} ({currency})",
+                title=f"📊 港股回购榜  {trade_date.isoformat()}  ({currency})",
+                title_style="bold white",
                 show_header=True,
-                header_style="bold cyan",
-                border_style="dim",
+                header_style="bold bright_cyan",
+                border_style="bright_black",
+                row_styles=[""],
+                pad_edge=False,
+                padding=(0, 1),
                 expand=True,
             )
-            table.add_column("#", justify="right", style="bold", min_width=3)
+            table.add_column("#", justify="right", style="dim", min_width=3, no_wrap=True)
             table.add_column("股票", min_width=16)
-            table.add_column("回购金额", justify="right", min_width=14)
+            table.add_column("回购金额", justify="right", style="bold", min_width=14)
             table.add_column("回购数量", justify="right", min_width=16)
-            table.add_column("本轮累计回购", justify="right", min_width=10)
-            table.add_column("本轮累计占比", justify="right", min_width=8)
+            table.add_column("涨跌幅", justify="right", min_width=10)
+            table.add_column("累计回购", justify="right", min_width=12)
+            table.add_column("累计占比", justify="right", min_width=8)
 
             for rank, item in enumerate(group, 1):
                 stock_display = f"{item.stock_code} {item.stock_name.get('zh-CN', '')}"
@@ -225,51 +286,61 @@ class TerminalRenderer:
                 if item.for_cancellation > 0:
                     qty_parts.append("[green](C)[/green]")
                 if item.for_treasury > 0:
-                    qty_parts.append("(T)")
+                    qty_parts.append("[yellow](T)[/yellow]")
                 qty_display = " ".join(qty_parts)
+
+                if item.change_pct is not None:
+                    pct = item.change_pct
+                    if pct >= 0:
+                        change_display = f"[green]{pct:+.2f}% ▲[/green]"
+                    else:
+                        change_display = f"[red]{pct:+.2f}% ▼[/red]"
+                else:
+                    change_display = "[dim]—[/dim]"
 
                 table.add_row(
                     str(rank),
                     stock_display,
-                    f"{item.total_amount:,.2f}",
+                    f"{item.total_amount:,.0f}",
                     qty_display,
+                    change_display,
                     f"{item.cumulative_quantity:,}"
                     if item.cumulative_quantity > 0
-                    else "—",
-                    f"{item.cumulative_pct:.4f}%" if item.cumulative_pct > 0 else "—",
+                    else "[dim]—[/dim]",
+                    f"{item.cumulative_pct:.4f}%"
+                    if item.cumulative_pct > 0
+                    else "[dim]—[/dim]",
                 )
 
             console.print(table)
             console.print()
 
         unique_companies = len({item.stock_code for item in items})
-        console.print(f"共 {unique_companies} 家公司进行回购")
+        console.print(f"[bold]共 {unique_companies} 家公司进行回购[/bold]")
         console.print()
         console.print(
-            "[dim]* 「本轮累计回购」指最新的股东大会决议案通过后的回购累计数量[/dim]"
+            "[dim]  * 累计回购：最新的股东大会决议案通过后的回购累计数量[/dim]"
         )
         console.print(
-            "[dim]* 「本轮累计占比」指累计回购股份数占最新的股东大会决议案通过当日的已发行股份（不包含库存股）的百分比[/dim]"
+            "[dim]  * 累计占比：累计回购股份数占股东大会决议案通过当日已发行股份（不含库存股）的百分比[/dim]"
         )
 
-        return buf.getvalue()
+        return console, unique_companies
 
 
 # ── 门面类 ──
 
 
 class DailyRanking:
-    """每日回购榜主类，协调数据获取、聚合和展示。"""
+    """每日回购榜主类，协调数据获取和聚合。"""
 
     def __init__(
         self,
         fetcher: DataFetcher | None = None,
         aggregator: DataAggregator | None = None,
-        renderer: TerminalRenderer | None = None,
     ) -> None:
         self._fetcher = fetcher or DataFetcher()
         self._aggregator = aggregator or DataAggregator()
-        self._renderer = renderer
         self._items: list[RankingItem] = []
         self._trade_date: date | None = None
 
@@ -291,12 +362,5 @@ class DailyRanking:
 
         stock_codes = list({r["stock_code"] for r in records})
         stock_names = self._fetcher.fetch_stock_names(stock_codes)
-        self._items = self._aggregator.aggregate(records, stock_names)
-
-    def print(self, top_n: int = 0) -> None:
-        """打印排行榜到控制台。"""
-        if not self._trade_date:
-            raise RuntimeError("请先调用 load() 加载数据")
-        if not self._renderer:
-            raise RuntimeError("未配置渲染器，请传入 TerminalRenderer")
-        print(self._renderer.render(self._trade_date, self._items, top_n))
+        price_changes = self._fetcher.fetch_price_changes(trade_date, stock_codes)
+        self._items = self._aggregator.aggregate(records, stock_names, price_changes)

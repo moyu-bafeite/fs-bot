@@ -6,6 +6,7 @@
 from lib.db.client import _md_client, _meta_client
 from lib.db.daily_prices import (
     get_max_trade_dates,
+    get_nr_close_prices,
     get_nr_daily_turnover,
     get_nr_daily_turnovers,
     upsert_br_daily_prices,
@@ -50,6 +51,7 @@ __all__ = [
     "upsert_repurchase_reports",
     "upsert_br_daily_prices",
     "upsert_nr_daily_prices",
+    "get_nr_close_prices",
     "get_nr_daily_turnover",
     "get_nr_daily_turnovers",
     "get_max_trade_dates",
