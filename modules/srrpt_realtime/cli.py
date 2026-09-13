@@ -34,6 +34,20 @@ def scrape(
 
 
 @app.command()
+def check_amendments():
+    """检测翌日披露报表修订（同一 trade_date 存在多个 document_url）"""
+    from rich.console import Console
+
+    from modules.srrpt_realtime.check_amendments import find_amendments, print_report
+
+    con = Console()
+    amendments = find_amendments(con)
+    print_report(amendments, con)
+    if amendments:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def parse(
     workers: Annotated[int, typer.Option(help="并发线程数")] = 50,
     push: Annotated[bool, typer.Option(help="推送解析结果到 hkex_repurchase_realtime_reports")] = False,
