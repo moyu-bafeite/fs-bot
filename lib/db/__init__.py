@@ -35,6 +35,8 @@ from lib.db.stocks import (
     HK_STOCKS_TABLE,
     get_hk_stock_by_code,
     get_hk_stocks,
+    get_hkex_id_by_code,
+    get_stock_meta_by_code,
     get_stock_names,
     upsert_stocks,
 )
@@ -45,6 +47,8 @@ __all__ = [
     "HK_STOCKS_TABLE",
     "get_hk_stocks",
     "get_hk_stock_by_code",
+    "get_hkex_id_by_code",
+    "get_stock_meta_by_code",
     "get_stock_names",
     "upsert_stocks",
     "get_repurchase_reports_by_trade_date",

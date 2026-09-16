@@ -16,3 +16,25 @@ def hkex_stock_data():
     count = sync()
     console = Console()
     console.print(f"[green]✓ 共写入 {count} 条股票记录[/green]")
+
+
+@app.command()
+def financial_statements(
+    ticker: str = typer.Option(..., help="股票代码，如 00700 或 700"),
+):
+    """查询指定股票的财务报表公告（年报/中报等）。"""
+    from modules.stock_info.financial_statements import FinancialStatementHandler
+
+    console = Console()
+    handler = FinancialStatementHandler()
+
+    try:
+        result = handler.fetch(ticker)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]请求失败: {e}[/red]")
+        raise typer.Exit(1)
+
+    handler.display(result, console)

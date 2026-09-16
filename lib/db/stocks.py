@@ -53,6 +53,28 @@ def get_hk_stock_by_code(stock_code: str) -> dict[str, Any] | None:
     return resp.data[0] if resp.data else None
 
 
+def get_hkex_id_by_code(stock_code: str) -> str | None:
+    resp = (
+        _table(HK_STOCKS_TABLE)
+        .select("hkex_id")
+        .eq("stock_code", stock_code)
+        .limit(1)
+        .execute()
+    )
+    return resp.data[0]["hkex_id"] if resp.data else None
+
+
+def get_stock_meta_by_code(stock_code: str) -> dict[str, Any] | None:
+    resp = (
+        _table(HK_STOCKS_TABLE)
+        .select("stock_code,stock_name,hkex_id")
+        .eq("stock_code", stock_code)
+        .limit(1)
+        .execute()
+    )
+    return resp.data[0] if resp.data else None
+
+
 def get_stock_names(stock_codes: list[str]) -> dict[str, dict[str, str]]:
     if not stock_codes:
         return {}
